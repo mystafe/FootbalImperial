@@ -1,0 +1,9 @@
+# Gizli ve kişisel dosyalar
+.env
+package-lock.json
+package.json
+node_modules
+Input
+temp_frames
+temp_audio
+.DS_Store
