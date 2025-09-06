@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 900">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0b1220"/>
+      <stop offset="100%" stop-color="#0b1220"/>
+    </linearGradient>
+    <radialGradient id="spot1" cx="20%" cy="10%" r="40%">
+      <stop offset="0%" stop-color="#10b981" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#10b981" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="spot2" cx="85%" cy="15%" r="45%">
+      <stop offset="0%" stop-color="#3b82f6" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#3b82f6" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1440" height="900" fill="url(#g)"/>
+  <rect width="1440" height="900" fill="url(#spot1)"/>
+  <rect width="1440" height="900" fill="url(#spot2)"/>
+  <!-- Subtle pitch lines -->
+  <g stroke="#ffffff" stroke-opacity="0.06" fill="none">
+    <rect x="220" y="160" width="1000" height="580" rx="4"/>
+    <line x1="720" y1="160" x2="720" y2="740"/>
+    <circle cx="720" cy="450" r="72"/>
+    <rect x="220" y="310" width="160" height="280"/>
+    <rect x="1060" y="310" width="160" height="280"/>
+    <rect x="220" y="362" width="64" height="176"/>
+    <rect x="1156" y="362" width="64" height="176"/>
+  </g>
+</svg>

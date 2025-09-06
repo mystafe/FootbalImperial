@@ -1,0 +1,695 @@
+import "./App.css"
+import { useEffect, useRef, useState } from "react"
+import { Spinner } from "./components/Spinner"
+import MapView from "./components/Map"
+import { useGameStore, DIRECTIONS, COUNTRIES } from "./store/game"
+import { createRng, weightedChoice } from "./lib/random"
+import { playCapture, playClick, playVictory, playDefeat } from "./lib/sound"
+import { motion } from "framer-motion"
+
+function App() {
+  const seed = useGameStore((s) => s.seed)
+  const teams = useGameStore((s) => s.teams)
+  const cells = useGameStore((s) => s.cells)
+  const history = useGameStore((s) => s.history)
+  const turn = useGameStore((s) => s.turn)
+  const applyAttack = useGameStore((s) => s.applyAttack)
+  const playAutoTurn = useGameStore((s) => s.playAutoTurn)
+  const gameStarted = useGameStore(
+    (s) => (s as unknown as { gameStarted: boolean }).gameStarted
+  )
+  const setGameStarted = useGameStore(
+    (s) => s.setGameStarted as (v: boolean) => void
+  )
+  const selectedCountry = useGameStore((s) => s.selectedCountry)
+  const setCountry = useGameStore((s) => s.setCountry)
+  const numTeams = useGameStore((s) => s.numTeams)
+  const setNumTeams = useGameStore((s) => s.setNumTeams)
+  const setPreviewTarget = useGameStore((s) => s.setPreviewTarget)
+  const resolveTarget = useGameStore((s) => s.resolveTarget)
+  const setSuppressLastOverlay = useGameStore(
+    (s) => s.setSuppressLastOverlay as (v: boolean) => void
+  )
+  const setFrozenSnapshotIndex = useGameStore(
+    (s) =>
+      (s as unknown as { setFrozenSnapshotIndex: (idx?: number) => void })
+        .setFrozenSnapshotIndex
+  )
+  const setPreviewFromTeamId = useGameStore(
+    (s) =>
+      (s as unknown as { setPreviewFromTeamId: (id?: number) => void })
+        .setPreviewFromTeamId
+  )
+
+  const [teamWinner, setTeamWinner] = useState<number | null>(null)
+  const [dirWinner, setDirWinner] = useState<number | null>(null)
+  const [uiStep, setUiStep] = useState<
+    "team" | "dir" | "dir-select" | "attack-confirm" | "attacking" | null
+  >(null)
+  const [teamSpinTarget, setTeamSpinTarget] = useState<number | undefined>(
+    undefined
+  )
+  const [dirSpinTarget, setDirSpinTarget] = useState<number | undefined>(
+    undefined
+  )
+  const [spinnerSize, setSpinnerSize] = useState<number>(100)
+  const [toast, setToast] = useState<string | null>(null)
+  const [showAttackerInfo, setShowAttackerInfo] = useState<boolean>(false)
+  const [showDefenderInfo, setShowDefenderInfo] = useState<boolean>(false)
+  const isSpinning = uiStep === "team" || uiStep === "dir"
+  const disabledTeamBtn = isSpinning
+  const disabledDirBtn = isSpinning || uiStep !== "dir-select"
+  const disabledApplyBtn = isSpinning || uiStep !== "attack-confirm"
+  const rngRef = useRef<() => number>(() => Math.random())
+  const [defenderInfo, setDefenderInfo] = useState<{
+    name: string
+    ovr: number
+  } | null>(null)
+
+  const liveTeams = teams.filter((t) => t.alive)
+
+  useEffect(() => {
+    rngRef.current = createRng(`${seed}:spins:${teams.length}:${cells.length}`)
+  }, [seed, teams.length, cells.length])
+
+  useEffect(() => {
+    const onResize = () => {
+      const w = window.innerWidth
+      setSpinnerSize(w >= 1536 ? 140 : w >= 1280 ? 120 : w >= 1024 ? 110 : 100)
+    }
+    onResize()
+    window.addEventListener("resize", onResize)
+    return () => window.removeEventListener("resize", onResize)
+  }, [])
+
+  useEffect(() => {
+    if (!history.length) return
+    const h = history[history.length - 1]
+    const attacker = teams.find((t) => t.id === h.attackerTeamId)
+    const defender = teams.find((t) => t.id === (h.defenderTeamId ?? -1))
+    const aName = attacker?.name ?? `Takım ${h.attackerTeamId + 1}`
+    const dName = defender?.name ?? `?`
+    const aOvr = attacker?.overall ?? 75
+    const dOvr = defender?.overall ?? 75
+    const winnerName = h.attackerWon ? aName : defender?.name ?? dName
+    const msg = `${aName} (${aOvr}) → ${dName} (${dOvr}) — ${winnerName} kazandı!`
+    setToast(msg)
+    const t = setTimeout(() => setToast(null), 6500)
+    return () => clearTimeout(t)
+  }, [history, teams])
+
+  // Find potential defender when direction is chosen
+  const teamAndCellIds = JSON.stringify({
+    t: teams.map((t) => t.id),
+    c: cells.map((c) => c.id)
+  })
+  useEffect(() => {
+    if (
+      teamWinner !== null &&
+      dirWinner !== null &&
+      uiStep === "attack-confirm"
+    ) {
+      const liveTeams = teams.filter((t) => t.alive)
+      const attackerTeam = liveTeams[teamWinner]
+      const direction = DIRECTIONS[dirWinner]
+      if (!attackerTeam) return
+
+      const t = resolveTarget(attackerTeam.id, direction)
+      if (t) {
+        const defenderId = cells.find((c) => c.id === t.toCellId)?.ownerTeamId
+        const defender = teams.find((tm) => tm.id === defenderId)
+        if (defender) {
+          setDefenderInfo({ name: defender.name, ovr: defender.overall ?? 75 })
+        } else if (defenderId === -1) {
+          setDefenderInfo({ name: "Neutral Zone", ovr: 50 })
+        }
+        try {
+          setPreviewTarget(t.fromCellId, t.toCellId)
+        } catch (e) {
+          console.warn(e)
+        }
+      }
+    } else {
+      setDefenderInfo(null)
+      // keep any previously set preview target during selection flow
+    }
+  }, [
+    uiStep,
+    teamWinner,
+    dirWinner,
+    teamAndCellIds,
+    teams,
+    cells,
+    setPreviewTarget,
+    resolveTarget
+  ])
+
+  const teamItems = liveTeams.map((t) => t.name)
+  const dirItems = DIRECTIONS
+  const DIR_TR: Record<string, string> = {
+    N: "Kuzey",
+    NE: "Kuzey Doğu",
+    E: "Doğu",
+    SE: "Güney Doğu",
+    S: "Güney",
+    SW: "Güney Batı",
+    W: "Batı",
+    NW: "Kuzey Batı"
+  }
+
+  const pickWeightedTeamIndex = () => {
+    if (liveTeams.length === 0) return 0
+    const counts = liveTeams.map(
+      (t) => cells.filter((c) => c.ownerTeamId === t.id).length
+    )
+    const maxCount = Math.max(...counts)
+    const minCount = Math.min(...counts)
+    const weights = liveTeams.map((t, i) => {
+      const cellCount = counts[i]
+      const comebackBoost = 1 + (maxCount - cellCount) * 0.1
+      const bullyPenalty = 1 - Math.max(0, cellCount - minCount) * 0.08
+      const form = t.form ?? 1
+      const overPowerPenalty = (t.overall ?? 75) > 85 ? 0.9 : 1
+      return Math.max(
+        0.05,
+        comebackBoost * bullyPenalty * overPowerPenalty * (1.0 / form)
+      )
+    })
+    const rng = createRng(`${seed}:wteam:${turn}:${Date.now()}`)
+    return weightedChoice(weights, rng)
+  }
+
+  const pickWeightedDirectionIndex = (attackerTeamId: number) => {
+    const dirAngle: Record<string, number> = {
+      E: 0,
+      NE: 45,
+      N: 90,
+      NW: 135,
+      W: 180,
+      SW: -135,
+      S: -90,
+      SE: -45
+    }
+    const attackerCells = cells.filter((c) => c.ownerTeamId === attackerTeamId)
+    const weights = DIRECTIONS.map((d) => {
+      let score = 0
+      for (const c of attackerCells) {
+        const [ax, ay] = c.centroid
+        for (const nIdx of c.neighbors || []) {
+          const nb = cells[nIdx]
+          if (!nb || nb.ownerTeamId === attackerTeamId) continue
+          const [bx, by] = nb.centroid
+          const dy = -(by - ay)
+          const dx = bx - ax
+          const aDeg = (Math.atan2(dy, dx) * 180) / Math.PI
+          const diff = Math.abs(((aDeg - dirAngle[d] + 180) % 360) - 180)
+          const w = Math.max(0, 1.0 - diff / 180)
+          score += 0.5 + 1.5 * w
+        }
+      }
+      return score
+    })
+    const rng = createRng(
+      `${seed}:wdir:${turn}:${attackerTeamId}:${Date.now()}`
+    )
+    return weightedChoice(weights, rng)
+  }
+
+  const isGameOver = liveTeams.length <= 1 && liveTeams.length > 0
+  const attackerTeam = teamWinner != null ? liveTeams[teamWinner] : undefined
+
+  return (
+    <div>
+      {toast && (
+        <div className="fixed left-1/2 top-8 z-50 -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-800/90 px-5 py-3 text-base font-semibold text-white shadow-lg backdrop-blur">
+          {toast}
+        </div>
+      )}
+      <div className="mx-auto w-full max-w-none p-0">
+        <header className="text-center">
+          <h1 className="text-4xl font-bold tracking-tighter text-white">
+            Futbol <span className="text-emerald-400">Emperyalizmi</span>
+          </h1>
+        </header>
+
+        {!gameStarted && (
+          <div className="relative mx-auto mt-8 max-w-2xl">
+            <div
+              className="pointer-events-none absolute inset-0 -z-10 rounded-2xl border border-slate-700/40"
+              style={{
+                backgroundImage: "url(/start-bg.svg)",
+                backgroundSize: "cover",
+                backgroundPosition: "center"
+              }}
+            />
+            <div className="pointer-events-none absolute inset-0 -z-10 rounded-2xl bg-gradient-to-b from-slate-900/30 to-slate-900/60" />
+            <div className="card p-6">
+              <h2 className="mb-4 text-xl font-semibold text-white">
+                Yeni Oyun Kur
+              </h2>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-300">
+                    Ülke
+                  </label>
+                  <select
+                    value={selectedCountry}
+                    onChange={(e) =>
+                      setCountry(e.target.value as (typeof COUNTRIES)[number])
+                    }
+                    className="w-full rounded-lg border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:ring-emerald-500"
+                  >
+                    {COUNTRIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-300">
+                    Takım Sayısı
+                  </label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={25}
+                    value={numTeams}
+                    onChange={(e) =>
+                      setNumTeams(parseInt(e.target.value || "0", 10))
+                    }
+                    className="w-full rounded-lg border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+              <div className="mt-6">
+                <button
+                  className="btn-primary w-full"
+                  onClick={() => setGameStarted(true)}
+                >
+                  Oyuna Başla
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {gameStarted && (
+          <div className="mt-6 grid grid-cols-1 gap-0 lg:grid-cols-12">
+            <div className="lg:col-span-10">
+              <MapView />
+              <div className="border-t border-slate-700 p-0 flex items-center justify-between">
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+                  {teams.map((t) => (
+                    <div
+                      key={t.id}
+                      className="flex items-center gap-1 rounded-lg bg-slate-800/80 p-1"
+                    >
+                      <span className="text-sm font-semibold tracking-wide text-white">
+                        {t.name}
+                      </span>
+                      <span className="ml-auto text-xs font-mono text-emerald-400">
+                        {cells.filter((c) => c.ownerTeamId === t.id).length}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  className="rounded bg-rose-600 px-3 py-2 text-white hover:bg-rose-700"
+                  onClick={() => {
+                    window.location.href = "/"
+                  }}
+                >
+                  Yeniden Başlat
+                </button>
+              </div>
+              <div className="border-t border-slate-700 p-4">
+                <div className="grid grid-cols-2 gap-1 sm:grid-cols-4">
+                  {teams.map((t) => (
+                    <div
+                      key={t.id}
+                      className="flex items-center gap-1 rounded-lg bg-slate-800/80 p-1"
+                    >
+                      <span className="text-sm font-semibold tracking-wide text-white">
+                        {t.name}
+                      </span>
+                      <span className="ml-auto text-xs font-mono text-emerald-400">
+                        {cells.filter((c) => c.ownerTeamId === t.id).length}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-4 lg:col-span-2">
+              <div className="card p-2 overflow-hidden">
+                <h2 className="mb-3 text-lg font-semibold text-white">
+                  Tur {turn + 1}
+                </h2>
+                {attackerTeam && showAttackerInfo && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="mb-2 flex flex-wrap items-center gap-3"
+                  >
+                    <div className="inline-flex items-center gap-2 rounded-lg bg-slate-700/60 px-3 py-1 text-sm">
+                      <span className="font-semibold">Saldıran:</span>
+                      <span
+                        className="inline-block h-3 w-3 rounded-full"
+                        style={{ backgroundColor: attackerTeam.color }}
+                      />
+                      <span>{attackerTeam.name}</span>
+                      <span className="text-xs text-slate-300">
+                        OVR {attackerTeam.overall ?? 75}
+                      </span>
+                    </div>
+                  </motion.div>
+                )}
+                {defenderInfo && showDefenderInfo && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="mb-2 flex flex-wrap items-center gap-3"
+                  >
+                    <div className="inline-flex items-center gap-2 rounded-lg bg-slate-700/60 px-3 py-1 text-sm">
+                      <span className="font-semibold">Savunan:</span>
+                      <span>{defenderInfo.name}</span>
+                      <span className="text-xs text-slate-300">
+                        OVR {defenderInfo.ovr}
+                      </span>
+                    </div>
+                    {dirWinner !== null && (
+                      <div className="inline-flex items-center gap-2 rounded-lg bg-slate-700/60 px-3 py-1 text-sm">
+                        <span className="font-semibold">Yön:</span>
+                        <span>{DIR_TR[DIRECTIONS[dirWinner]]}</span>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+                <div className="flex flex-col items-center gap-4">
+                  {/* Team Spinner */}
+                  {uiStep !== "team" && teamWinner === null && (
+                    <button
+                      onClick={() => {
+                        setUiStep("team")
+                        setTeamSpinTarget(pickWeightedTeamIndex())
+                        // Immediately suppress old overlays and clear any preview
+                        try {
+                          setSuppressLastOverlay(true)
+                          setPreviewTarget(undefined, undefined)
+                          setPreviewFromTeamId(undefined)
+                        } catch (e) {
+                          console.warn(e)
+                        }
+                      }}
+                      className="btn-secondary w-full"
+                      disabled={disabledTeamBtn}
+                    >
+                      Saldıran Takımı Seç
+                    </button>
+                  )}
+                  {(uiStep === "team" || uiStep === "dir-select") &&
+                    teamSpinTarget !== undefined && (
+                      <Spinner
+                        items={
+                          teamItems.length
+                            ? teamItems.map((t) => t.slice(0, 3))
+                            : ["-"]
+                        }
+                        colors={liveTeams.map((t) => t.color)}
+                        winnerIndex={teamSpinTarget}
+                        fullNames={teamItems.length ? teamItems : undefined}
+                        onDone={(i) => {
+                          setTeamWinner(i)
+                          setUiStep("dir-select")
+                          setShowAttackerInfo(false)
+                          try {
+                            const attacker = liveTeams[i]
+                            if (attacker) {
+                              setSuppressLastOverlay(true)
+                              setPreviewTarget(
+                                attacker.capitalCellId,
+                                undefined
+                              )
+                              setPreviewFromTeamId(attacker.id)
+                            }
+                          } catch (e) {
+                            console.warn(e)
+                          }
+                          setTimeout(() => setShowAttackerInfo(true), 2000)
+                        }}
+                        sizePx={spinnerSize}
+                      />
+                    )}
+                  {/* Direction Spinner */}
+                  {teamWinner !== null && uiStep === "dir-select" && (
+                    <button
+                      onClick={() => {
+                        setUiStep("dir")
+                        setDirSpinTarget(
+                          pickWeightedDirectionIndex(liveTeams[teamWinner].id)
+                        )
+                      }}
+                      className="btn-secondary w-full"
+                      disabled={disabledDirBtn}
+                    >
+                      Saldırı Yönünü Seç
+                    </button>
+                  )}
+                  {(uiStep === "dir" || uiStep === "attack-confirm") &&
+                    dirSpinTarget !== undefined && (
+                      <Spinner
+                        items={dirItems}
+                        winnerIndex={dirSpinTarget}
+                        onDone={(i) => {
+                          setDirWinner(i)
+                          setUiStep("attack-confirm")
+                          setShowDefenderInfo(false)
+                          try {
+                            if (teamWinner != null) {
+                              const attacker = liveTeams[teamWinner]
+                              const direction = DIRECTIONS[i]
+                              const t = resolveTarget(attacker.id, direction)
+                              if (!t) {
+                                setToast(
+                                  "Belirtilen yönde takım yok. Çark tekrar çevriliyor."
+                                )
+                                // re-spin direction automatically
+                                setUiStep("dir")
+                                setDirSpinTarget(
+                                  pickWeightedDirectionIndex(attacker.id)
+                                )
+                                return
+                              }
+                              setSuppressLastOverlay(true)
+                              setPreviewTarget(t.fromCellId, t.toCellId)
+                              setPreviewFromTeamId(attacker.id)
+                            }
+                          } catch (e) {
+                            console.warn(e)
+                          }
+                          setTimeout(() => setShowDefenderInfo(true), 2000)
+                        }}
+                        sizePx={spinnerSize}
+                      />
+                    )}
+                  {/* Attack Button */}
+                  {dirWinner !== null && uiStep === "attack-confirm" && (
+                    <button
+                      className="btn-primary w-full"
+                      disabled={disabledApplyBtn}
+                      onClick={() => {
+                        if (teamWinner == null || dirWinner == null) return
+                        const attackerTeam = liveTeams[teamWinner]
+                        const dir = DIRECTIONS[dirWinner]
+                        if (!attackerTeam) return
+                        playClick()
+                        setUiStep("attacking")
+                        // Freeze map at current snapshot during animation & toast
+                        try {
+                          const idx =
+                            useGameStore.getState().snapshots.length - 1
+                          setFrozenSnapshotIndex(idx >= 0 ? idx : undefined)
+                        } catch (e) {
+                          console.warn(e)
+                        }
+                        setTimeout(() => {
+                          const r = applyAttack(attackerTeam.id, dir)
+                          if (!r.success) {
+                            setToast("Uygun hedef bulunamadı. Tekrar deneyin.")
+                          } else {
+                            setTimeout(() => playCapture(), 160)
+                            // Play victory/defeat motif after state updates propagate slightly
+                            setTimeout(() => {
+                              const last = useGameStore
+                                .getState()
+                                .history.slice(-1)[0]
+                              if (last?.attackerWon) playVictory()
+                              else playDefeat()
+                            }, 260)
+                          }
+                          // Unfreeze after toast duration
+                          setTimeout(
+                            () => setFrozenSnapshotIndex(undefined),
+                            1600
+                          )
+                          setUiStep(null)
+                          setTeamWinner(null)
+                          setDirWinner(null)
+                          setTeamSpinTarget(undefined)
+                          setDirSpinTarget(undefined)
+                          setShowAttackerInfo(false)
+                          setShowDefenderInfo(false)
+                          setSuppressLastOverlay(false)
+                          setPreviewTarget(undefined, undefined)
+                          setPreviewFromTeamId(undefined)
+                        }, 800)
+                      }}
+                    >
+                      Saldırıyı Başlat
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="card p-4">
+                <h2 className="mb-2 text-lg font-semibold text-white">
+                  Geçmiş
+                </h2>
+                <div className="max-h-[240px] overflow-auto rounded-lg bg-slate-900/70 p-2 text-sm">
+                  {history.length === 0 ? (
+                    <div className="text-slate-400">Henüz hamle yok.</div>
+                  ) : (
+                    <ul className="space-y-1">
+                      {history
+                        .slice()
+                        .reverse()
+                        .map((h, idx) => (
+                          <li
+                            key={idx}
+                            className="flex items-center justify-between rounded-md bg-slate-800 p-2"
+                          >
+                            <span className="font-mono text-xs">
+                              #{h.turn} •{" "}
+                              {teams.find((t) => t.id === h.attackerTeamId)
+                                ?.name ?? "?"}{" "}
+                              → {h.direction} →{" "}
+                              {h.defenderTeamId != null && h.defenderTeamId >= 0
+                                ? teams.find((t) => t.id === h.defenderTeamId)
+                                    ?.name ?? "?"
+                                : "Neutral"}{" "}
+                              {h.attackerWon ? "✅" : "❌"}
+                            </span>
+                            <span className="text-xs text-slate-500">
+                              {new Date(h.timestamp).toLocaleTimeString()}
+                            </span>
+                          </li>
+                        ))}
+                    </ul>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      {/* Mobile bar remains */}
+      <div className="fixed inset-x-0 bottom-0 z-40 block border-t bg-white/95 p-3 backdrop-blur md:hidden">
+        <div className="mx-auto flex max-w-5xl items-center justify-center gap-2">
+          <button
+            aria-label="Spin Team"
+            className="rounded bg-indigo-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onClick={() => {
+              const idx = Math.max(
+                0,
+                Math.min(
+                  Math.max(1, liveTeams.length) - 1,
+                  Math.floor(rngRef.current() * Math.max(1, liveTeams.length))
+                )
+              )
+              setTeamWinner(idx)
+            }}
+          >
+            Team
+          </button>
+          <button
+            aria-label="Spin Direction"
+            className="rounded bg-indigo-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+            onClick={() => {
+              const idx = Math.max(
+                0,
+                Math.min(
+                  DIRECTIONS.length - 1,
+                  Math.floor(rngRef.current() * DIRECTIONS.length)
+                )
+              )
+              setDirWinner(idx)
+            }}
+          >
+            Dir
+          </button>
+          <button
+            aria-label="Apply Attack"
+            className="rounded bg-emerald-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            onClick={() => {
+              if (teamWinner == null || dirWinner == null) return
+              const attackerTeam = liveTeams[teamWinner]
+              const dir = DIRECTIONS[dirWinner]
+              if (!attackerTeam) return
+              playClick()
+              applyAttack(attackerTeam.id, dir)
+              setTimeout(() => playCapture(), 120)
+            }}
+          >
+            Go
+          </button>
+          <button
+            aria-label="Fast Auto Turn"
+            className="rounded bg-rose-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-rose-500"
+            onClick={() => {
+              const r = playAutoTurn()
+              if (r.success) {
+                playClick()
+                setTimeout(() => playCapture(), 120)
+              }
+            }}
+          >
+            Auto
+          </button>
+        </div>
+      </div>
+      {isGameOver && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h3 className="text-xl font-semibold">Game Over</h3>
+            <p className="mt-2 text-gray-700">Winner: {liveTeams[0]?.name}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                className="rounded bg-gray-700 px-4 py-2 text-white hover:bg-gray-800"
+                onClick={() => window.location.reload()}
+              >
+                New Game
+              </button>
+              <button
+                className="rounded bg-rose-600 px-4 py-2 text-white hover:bg-rose-700"
+                onClick={() => {
+                  const r = playAutoTurn()
+                  if (r.success) {
+                    playClick()
+                    setTimeout(() => playCapture(), 120)
+                  }
+                }}
+              >
+                Fast Auto Turn
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default App
