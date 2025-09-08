@@ -6,6 +6,7 @@ import { useGameStore, DIRECTIONS, COUNTRIES } from "./store/game"
 import { createRng, weightedChoice } from "./lib/random"
 import { playCapture, playClick, playVictory, playDefeat } from "./lib/sound"
 import { motion } from "framer-motion"
+import { loadConfig, saveConfig, type GameConfig } from "./config/game"
 
 function App() {
   const seed = useGameStore((s) => s.seed)
@@ -25,6 +26,11 @@ function App() {
   const setCountry = useGameStore((s) => s.setCountry)
   const numTeams = useGameStore((s) => s.numTeams)
   const setNumTeams = useGameStore((s) => s.setNumTeams)
+  const mapColoring = useGameStore((s) => s.mapColoring)
+  const setMapColoring = useGameStore((s) => s.setMapColoring)
+
+  // Config state
+  const [config, setConfig] = useState<GameConfig>(loadConfig())
   const setPreviewTarget = useGameStore((s) => s.setPreviewTarget)
   const resolveTarget = useGameStore((s) => s.resolveTarget)
   const setSuppressLastOverlay = useGameStore(
@@ -44,7 +50,13 @@ function App() {
   const [teamWinner, setTeamWinner] = useState<number | null>(null)
   const [dirWinner, setDirWinner] = useState<number | null>(null)
   const [uiStep, setUiStep] = useState<
-    "team" | "dir" | "dir-select" | "attack-confirm" | "attacking" | null
+    | "team"
+    | "dir"
+    | "dir-select"
+    | "attack-confirm"
+    | "attacking"
+    | "team-select"
+    | null
   >(null)
   const [teamSpinTarget, setTeamSpinTarget] = useState<number | undefined>(
     undefined
@@ -89,12 +101,10 @@ function App() {
     const defender = teams.find((t) => t.id === (h.defenderTeamId ?? -1))
     const aName = attacker?.name ?? `Takım ${h.attackerTeamId + 1}`
     const dName = defender?.name ?? `?`
-    const aOvr = attacker?.overall ?? 75
-    const dOvr = defender?.overall ?? 75
     const winnerName = h.attackerWon ? aName : defender?.name ?? dName
-    const msg = `${aName} (${aOvr}) → ${dName} (${dOvr}) — ${winnerName} kazandı!`
+    const msg = `${aName} → ${dName} — ${winnerName} kazandı!`
     setToast(msg)
-    const t = setTimeout(() => setToast(null), 6500)
+    const t = setTimeout(() => setToast(null), 3000)
     return () => clearTimeout(t)
   }, [history, teams])
 
@@ -144,36 +154,19 @@ function App() {
     resolveTarget
   ])
 
-  const teamItems = liveTeams.map((t) => t.name)
-  const dirItems = DIRECTIONS
-  const DIR_TR: Record<string, string> = {
-    N: "Kuzey",
-    NE: "Kuzey Doğu",
-    E: "Doğu",
-    SE: "Güney Doğu",
-    S: "Güney",
-    SW: "Güney Batı",
-    W: "Batı",
-    NW: "Kuzey Batı"
-  }
-
   const pickWeightedTeamIndex = () => {
     if (liveTeams.length === 0) return 0
     const counts = liveTeams.map(
       (t) => cells.filter((c) => c.ownerTeamId === t.id).length
     )
     const maxCount = Math.max(...counts)
-    const minCount = Math.min(...counts)
     const weights = liveTeams.map((t, i) => {
-      const cellCount = counts[i]
-      const comebackBoost = 1 + (maxCount - cellCount) * 0.1
-      const bullyPenalty = 1 - Math.max(0, cellCount - minCount) * 0.08
-      const form = t.form ?? 1
-      const overPowerPenalty = (t.overall ?? 75) > 85 ? 0.9 : 1
-      return Math.max(
-        0.05,
-        comebackBoost * bullyPenalty * overPowerPenalty * (1.0 / form)
-      )
+      const count = counts[i]
+      // Prefer teams with fewer cells (underdogs)
+      const underdogBonus = count < maxCount ? 1.5 : 1.0
+      // Prefer teams with higher overall ratings
+      const ratingBonus = (t.overall ?? 75) / 100
+      return underdogBonus * ratingBonus
     })
     const rng = createRng(`${seed}:wteam:${turn}:${Date.now()}`)
     return weightedChoice(weights, rng)
@@ -186,17 +179,24 @@ function App() {
       N: 90,
       NW: 135,
       W: 180,
-      SW: -135,
-      S: -90,
-      SE: -45
+      SW: 225,
+      S: 270,
+      SE: 315
     }
     const attackerCells = cells.filter((c) => c.ownerTeamId === attackerTeamId)
+    if (attackerCells.length === 0) return 0
 
-    // First, find all valid neighboring targets
+    // Find valid neighboring teams
     const validNeighbors = new Set<number>()
-    for (const c of attackerCells) {
-      for (const nIdx of c.neighbors || []) {
-        const nb = cells[nIdx]
+    for (const cell of attackerCells) {
+      const neighbors = cells.filter((c) => {
+        // Simple neighbor detection based on distance
+        const dx = c.centroid[0] - cell.centroid[0]
+        const dy = c.centroid[1] - cell.centroid[1]
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        return dist < 100 && c.ownerTeamId !== attackerTeamId
+      })
+      for (const nb of neighbors) {
         if (!nb || nb.ownerTeamId === attackerTeamId) continue
         validNeighbors.add(nb.ownerTeamId)
       }
@@ -233,7 +233,7 @@ function App() {
 
         // Calculate direction from attacker to target
         const dx = targetCentroid[0] - attackerCentroid[0]
-        const dy = -(targetCentroid[1] - attackerCentroid[1]) // Flip Y for screen coordinates
+        const dy = targetCentroid[1] - attackerCentroid[1]
         const aDeg = (Math.atan2(dy, dx) * 180) / Math.PI
 
         // Calculate how well this direction matches the current direction
@@ -243,10 +243,84 @@ function App() {
       }
       return score
     })
+
     const rng = createRng(
       `${seed}:wdir:${turn}:${attackerTeamId}:${Date.now()}`
     )
     return weightedChoice(weights, rng)
+  }
+
+  // Fast mode: auto-select team and direction, then auto-attack
+  useEffect(() => {
+    if (config.fastMode && uiStep === "team-select" && liveTeams.length > 0) {
+      // Auto-select team
+      const teamIndex = pickWeightedTeamIndex()
+      setTeamWinner(teamIndex)
+      setUiStep("dir-select")
+
+      // Auto-select direction after team selection
+      setTimeout(() => {
+        const attacker = liveTeams[teamIndex]
+        if (attacker) {
+          const dirIndex = pickWeightedDirectionIndex(attacker.id)
+          setDirWinner(dirIndex)
+          setUiStep("attack-confirm")
+
+          // Auto-attack after direction selection
+          setTimeout(() => {
+            const direction = DIRECTIONS[dirIndex]
+            const r = applyAttack(attacker.id, direction)
+            if (r.success) {
+              setTimeout(() => playCapture(), 160)
+              setTimeout(() => {
+                const last = useGameStore.getState().history.slice(-1)[0]
+                if (last?.attackerWon) playVictory()
+                else playDefeat()
+              }, 400)
+            }
+
+            // Reset UI state
+            setTeamWinner(null)
+            setDirWinner(null)
+            setTeamSpinTarget(undefined)
+            setDirSpinTarget(undefined)
+            setUiStep("team-select")
+            setShowAttackerInfo(false)
+            setShowDefenderInfo(false)
+            setPreviewTarget(undefined, undefined)
+            setPreviewFromTeamId(undefined)
+            setSuppressLastOverlay(true)
+            setTimeout(() => setSuppressLastOverlay(false), 100)
+          }, 1000) // 1 second delay to show the preview arrow
+        }
+      }, 500) // 0.5 second delay between team and direction selection
+    }
+  }, [
+    config.fastMode,
+    uiStep,
+    liveTeams,
+    applyAttack,
+    setTeamWinner,
+    setUiStep,
+    setDirWinner,
+    setPreviewTarget,
+    setPreviewFromTeamId,
+    setSuppressLastOverlay,
+    pickWeightedTeamIndex,
+    pickWeightedDirectionIndex
+  ])
+
+  const teamItems = liveTeams.map((t) => t.name)
+  const dirItems = DIRECTIONS
+  const DIR_TR: Record<string, string> = {
+    N: "Kuzey",
+    NE: "Kuzey Doğu",
+    E: "Doğu",
+    SE: "Güney Doğu",
+    S: "Güney",
+    SW: "Güney Batı",
+    W: "Batı",
+    NW: "Kuzey Batı"
   }
 
   const isGameOver = liveTeams.length <= 1 && liveTeams.length > 0
@@ -314,6 +388,49 @@ function App() {
                     }
                     className="w-full rounded-lg border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:ring-emerald-500"
                   />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-300">
+                    Harita Renklendirme
+                  </label>
+                  <select
+                    value={mapColoring}
+                    onChange={(e) =>
+                      setMapColoring(e.target.value as "solid" | "striped")
+                    }
+                    className="w-full rounded-lg border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:ring-emerald-500"
+                  >
+                    <option value="striped">Şeritli Desenler</option>
+                    <option value="solid">Düz Renkler</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-300">
+                    Oyun Modu
+                  </label>
+                  <select
+                    value={
+                      config.fastMode
+                        ? "fast"
+                        : config.manualMode
+                        ? "manual"
+                        : "normal"
+                    }
+                    onChange={(e) => {
+                      const newConfig = {
+                        ...config,
+                        fastMode: e.target.value === "fast",
+                        manualMode: e.target.value === "manual"
+                      }
+                      setConfig(newConfig)
+                      saveConfig(newConfig)
+                    }}
+                    className="w-full rounded-lg border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white focus:border-emerald-500 focus:ring-emerald-500"
+                  >
+                    <option value="normal">Normal (Spinner ile)</option>
+                    <option value="fast">Hızlı (Otomatik)</option>
+                    <option value="manual">Manuel (Elle Seçim)</option>
+                  </select>
                 </div>
               </div>
               <div className="mt-6">
@@ -426,28 +543,209 @@ function App() {
                   </motion.div>
                 )}
                 <div className="flex flex-col items-center gap-4">
-                  {/* Team Spinner */}
-                  {uiStep !== "team" && teamWinner === null && (
-                    <button
-                      onClick={() => {
-                        setUiStep("team")
-                        setTeamSpinTarget(pickWeightedTeamIndex())
-                        // Immediately suppress old overlays and clear any preview
-                        try {
-                          setSuppressLastOverlay(true)
-                          setPreviewTarget(undefined, undefined)
-                          setPreviewFromTeamId(undefined)
-                        } catch (e) {
-                          console.warn(e)
-                        }
-                      }}
-                      className="btn-secondary w-full"
-                      disabled={disabledTeamBtn}
-                    >
-                      Saldıran Takımı Seç
-                    </button>
+                  {/* Fast Mode Status */}
+                  {config.fastMode && (
+                    <div className="text-center">
+                      <div className="text-lg font-semibold text-emerald-400">
+                        🚀 Hızlı Oyun Modu
+                      </div>
+                      <div className="text-sm text-slate-400">
+                        Otomatik saldırılar yapılıyor...
+                      </div>
+                      <button
+                        onClick={() => {
+                          // Force next turn in fast mode
+                          if (uiStep === "team-select") {
+                            const teamIndex = pickWeightedTeamIndex()
+                            setTeamWinner(teamIndex)
+                            setUiStep("dir-select")
+                          }
+                        }}
+                        className="mt-2 rounded bg-emerald-600 px-4 py-2 text-sm text-white hover:bg-emerald-700"
+                      >
+                        Fast Turn
+                      </button>
+                    </div>
                   )}
-                  {(uiStep === "team" || uiStep === "dir-select") &&
+
+                  {/* Manual Mode Status */}
+                  {config.manualMode && (
+                    <div className="text-center">
+                      <div className="text-lg font-semibold text-blue-400">
+                        🎮 Manuel Oyun Modu
+                      </div>
+                      <div className="text-sm text-slate-400">
+                        Saldıran, savunan ve sonucu elle seçin
+                      </div>
+
+                      {/* Manual Team Selection */}
+                      {uiStep === "team-select" && (
+                        <div className="mt-4 space-y-2">
+                          <div className="text-sm font-medium text-slate-300">
+                            Saldıran Takım:
+                          </div>
+                          <select
+                            value={teamWinner || ""}
+                            onChange={(e) =>
+                              setTeamWinner(parseInt(e.target.value))
+                            }
+                            className="w-full rounded-lg border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white"
+                          >
+                            <option value="">Takım Seçin</option>
+                            {liveTeams.map((team, index) => (
+                              <option key={team.id} value={index}>
+                                {team.name}
+                              </option>
+                            ))}
+                          </select>
+                          {teamWinner !== null && (
+                            <button
+                              onClick={() => setUiStep("dir-select")}
+                              className="btn-primary w-full"
+                            >
+                              Devam Et
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Manual Direction Selection */}
+                      {uiStep === "dir-select" && teamWinner !== null && (
+                        <div className="mt-4 space-y-2">
+                          <div className="text-sm font-medium text-slate-300">
+                            Saldırı Yönü:
+                          </div>
+                          <select
+                            value={dirWinner || ""}
+                            onChange={(e) =>
+                              setDirWinner(parseInt(e.target.value))
+                            }
+                            className="w-full rounded-lg border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white"
+                          >
+                            <option value="">Yön Seçin</option>
+                            {DIRECTIONS.map((dir, index) => (
+                              <option key={dir} value={index}>
+                                {dir}
+                              </option>
+                            ))}
+                          </select>
+                          {dirWinner !== null && (
+                            <button
+                              onClick={() => setUiStep("attack-confirm")}
+                              className="btn-primary w-full"
+                            >
+                              Devam Et
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Manual Result Selection */}
+                      {uiStep === "attack-confirm" &&
+                        teamWinner !== null &&
+                        dirWinner !== null && (
+                          <div className="mt-4 space-y-2">
+                            <div className="text-sm font-medium text-slate-300">
+                              Saldırı Sonucu:
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                onClick={() => {
+                                  // Manual attack with attacker winning
+                                  if (teamWinner == null || dirWinner == null)
+                                    return
+                                  const attackerTeam = liveTeams[teamWinner]
+                                  const dir = DIRECTIONS[dirWinner]
+                                  if (!attackerTeam) return
+
+                                  // Apply manual attack result
+                                  const result = applyAttack(
+                                    attackerTeam.id,
+                                    dir
+                                  )
+                                  if (result.success) {
+                                    // Reset for next turn
+                                    setTeamWinner(null)
+                                    setDirWinner(null)
+                                    setUiStep("team-select")
+                                    setPreviewTarget(undefined, undefined)
+                                    setPreviewFromTeamId(undefined)
+                                    setSuppressLastOverlay(true)
+                                    setTimeout(
+                                      () => setSuppressLastOverlay(false),
+                                      100
+                                    )
+                                  }
+                                }}
+                                className="btn-primary text-sm"
+                              >
+                                Saldıran Kazandı
+                              </button>
+                              <button
+                                onClick={() => {
+                                  // Manual attack with defender winning
+                                  if (teamWinner == null || dirWinner == null)
+                                    return
+                                  const attackerTeam = liveTeams[teamWinner]
+                                  const dir = DIRECTIONS[dirWinner]
+                                  if (!attackerTeam) return
+
+                                  // Apply manual attack result (defender wins)
+                                  const result = applyAttack(
+                                    attackerTeam.id,
+                                    dir
+                                  )
+                                  if (result.success) {
+                                    // Reset for next turn
+                                    setTeamWinner(null)
+                                    setDirWinner(null)
+                                    setUiStep("team-select")
+                                    setPreviewTarget(undefined, undefined)
+                                    setPreviewFromTeamId(undefined)
+                                    setSuppressLastOverlay(true)
+                                    setTimeout(
+                                      () => setSuppressLastOverlay(false),
+                                      100
+                                    )
+                                  }
+                                }}
+                                className="btn-secondary text-sm"
+                              >
+                                Savunan Kazandı
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                    </div>
+                  )}
+
+                  {/* Team Spinner */}
+                  {!config.fastMode &&
+                    !config.manualMode &&
+                    uiStep !== "team" &&
+                    teamWinner === null && (
+                      <button
+                        onClick={() => {
+                          setUiStep("team")
+                          setTeamSpinTarget(pickWeightedTeamIndex())
+                          // Immediately suppress old overlays and clear any preview
+                          try {
+                            setSuppressLastOverlay(true)
+                            setPreviewTarget(undefined, undefined)
+                            setPreviewFromTeamId(undefined)
+                          } catch (e) {
+                            console.warn(e)
+                          }
+                        }}
+                        className="btn-secondary w-full"
+                        disabled={disabledTeamBtn}
+                      >
+                        Saldıran Takımı Seç
+                      </button>
+                    )}
+                  {!config.fastMode &&
+                    !config.manualMode &&
+                    (uiStep === "team" || uiStep === "dir-select") &&
                     teamSpinTarget !== undefined && (
                       <Spinner
                         items={
@@ -481,21 +779,26 @@ function App() {
                       />
                     )}
                   {/* Direction Spinner */}
-                  {teamWinner !== null && uiStep === "dir-select" && (
-                    <button
-                      onClick={() => {
-                        setUiStep("dir")
-                        setDirSpinTarget(
-                          pickWeightedDirectionIndex(liveTeams[teamWinner].id)
-                        )
-                      }}
-                      className="btn-secondary w-full"
-                      disabled={disabledDirBtn}
-                    >
-                      Saldırı Yönünü Seç
-                    </button>
-                  )}
-                  {(uiStep === "dir" || uiStep === "attack-confirm") &&
+                  {!config.fastMode &&
+                    !config.manualMode &&
+                    teamWinner !== null &&
+                    uiStep === "dir-select" && (
+                      <button
+                        onClick={() => {
+                          setUiStep("dir")
+                          setDirSpinTarget(
+                            pickWeightedDirectionIndex(liveTeams[teamWinner].id)
+                          )
+                        }}
+                        className="btn-secondary w-full"
+                        disabled={disabledDirBtn}
+                      >
+                        Saldırı Yönünü Seç
+                      </button>
+                    )}
+                  {!config.fastMode &&
+                    !config.manualMode &&
+                    (uiStep === "dir" || uiStep === "attack-confirm") &&
                     dirSpinTarget !== undefined && (
                       <Spinner
                         key={`dir-spinner-${dirSpinTarget}-${turn}`}
@@ -510,7 +813,45 @@ function App() {
                               const attacker = liveTeams[teamWinner]
                               const direction = DIRECTIONS[i]
                               const t = resolveTarget(attacker.id, direction)
+
+                              // Set preview arrow when direction is selected
+                              if (t) {
+                                setPreviewTarget(t.fromCellId, t.toCellId)
+                              }
+
                               if (!t) {
+                                // Check if this team has any valid neighbors at all
+                                const attackerCells = cells.filter(
+                                  (c) => c.ownerTeamId === attacker.id
+                                )
+                                const validNeighbors = new Set<number>()
+                                for (const c of attackerCells) {
+                                  for (const nIdx of c.neighbors || []) {
+                                    const nb = cells[nIdx]
+                                    if (!nb || nb.ownerTeamId === attacker.id)
+                                      continue
+                                    validNeighbors.add(nb.ownerTeamId)
+                                  }
+                                }
+
+                                if (validNeighbors.size === 0) {
+                                  // No valid targets for this team, skip to next team
+                                  setToast(
+                                    "Bu takımın saldırabileceği hedef yok. Sonraki takıma geçiliyor."
+                                  )
+                                  setTimeout(() => {
+                                    setToast("")
+                                    setUiStep("team")
+                                    setTeamWinner(null)
+                                    setDirWinner(null)
+                                    setDirSpinTarget(undefined)
+                                    setSuppressLastOverlay(false)
+                                    setPreviewTarget(undefined, undefined)
+                                    setPreviewFromTeamId(undefined)
+                                  }, 2000)
+                                  return
+                                }
+
                                 setToast(
                                   "Belirtilen yönde takım yok. Çark tekrar çevriliyor."
                                 )
@@ -526,7 +867,7 @@ function App() {
                                 // Use setTimeout to ensure state updates are processed
                                 setTimeout(() => {
                                   setDirSpinTarget(newTarget)
-                                }, 50)
+                                }, 100) // Increased delay
                                 return
                               }
                               setSuppressLastOverlay(true)
@@ -542,61 +883,66 @@ function App() {
                       />
                     )}
                   {/* Attack Button */}
-                  {dirWinner !== null && uiStep === "attack-confirm" && (
-                    <button
-                      className="btn-primary w-full"
-                      disabled={disabledApplyBtn}
-                      onClick={() => {
-                        if (teamWinner == null || dirWinner == null) return
-                        const attackerTeam = liveTeams[teamWinner]
-                        const dir = DIRECTIONS[dirWinner]
-                        if (!attackerTeam) return
-                        playClick()
-                        setUiStep("attacking")
-                        // Freeze map at current snapshot during animation & toast
-                        try {
-                          const idx =
-                            useGameStore.getState().snapshots.length - 1
-                          setFrozenSnapshotIndex(idx >= 0 ? idx : undefined)
-                        } catch (e) {
-                          console.warn(e)
-                        }
-                        setTimeout(() => {
-                          const r = applyAttack(attackerTeam.id, dir)
-                          if (!r.success) {
-                            setToast("Uygun hedef bulunamadı. Tekrar deneyin.")
-                          } else {
-                            setTimeout(() => playCapture(), 160)
-                            // Play victory/defeat motif after state updates propagate slightly
-                            setTimeout(() => {
-                              const last = useGameStore
-                                .getState()
-                                .history.slice(-1)[0]
-                              if (last?.attackerWon) playVictory()
-                              else playDefeat()
-                            }, 260)
+                  {!config.fastMode &&
+                    !config.manualMode &&
+                    dirWinner !== null &&
+                    uiStep === "attack-confirm" && (
+                      <button
+                        className="btn-primary w-full"
+                        disabled={disabledApplyBtn}
+                        onClick={() => {
+                          if (teamWinner == null || dirWinner == null) return
+                          const attackerTeam = liveTeams[teamWinner]
+                          const dir = DIRECTIONS[dirWinner]
+                          if (!attackerTeam) return
+                          playClick()
+                          setUiStep("attacking")
+                          // Freeze map at current snapshot during animation & toast
+                          try {
+                            const idx =
+                              useGameStore.getState().snapshots.length - 1
+                            setFrozenSnapshotIndex(idx >= 0 ? idx : undefined)
+                          } catch (e) {
+                            console.warn(e)
                           }
-                          // Unfreeze after toast duration
-                          setTimeout(
-                            () => setFrozenSnapshotIndex(undefined),
-                            1600
-                          )
-                          setUiStep(null)
-                          setTeamWinner(null)
-                          setDirWinner(null)
-                          setTeamSpinTarget(undefined)
-                          setDirSpinTarget(undefined)
-                          setShowAttackerInfo(false)
-                          setShowDefenderInfo(false)
-                          setSuppressLastOverlay(false)
-                          setPreviewTarget(undefined, undefined)
-                          setPreviewFromTeamId(undefined)
-                        }, 800)
-                      }}
-                    >
-                      Saldırıyı Başlat
-                    </button>
-                  )}
+                          setTimeout(() => {
+                            const r = applyAttack(attackerTeam.id, dir)
+                            if (!r.success) {
+                              setToast(
+                                "Uygun hedef bulunamadı. Tekrar deneyin."
+                              )
+                            } else {
+                              setTimeout(() => playCapture(), 160)
+                              // Play victory/defeat motif after state updates propagate slightly
+                              setTimeout(() => {
+                                const last = useGameStore
+                                  .getState()
+                                  .history.slice(-1)[0]
+                                if (last?.attackerWon) playVictory()
+                                else playDefeat()
+                              }, 260)
+                            }
+                            // Unfreeze after toast duration
+                            setTimeout(
+                              () => setFrozenSnapshotIndex(undefined),
+                              1600
+                            )
+                            setUiStep(null)
+                            setTeamWinner(null)
+                            setDirWinner(null)
+                            setTeamSpinTarget(undefined)
+                            setDirSpinTarget(undefined)
+                            setShowAttackerInfo(false)
+                            setShowDefenderInfo(false)
+                            setSuppressLastOverlay(false)
+                            setPreviewTarget(undefined, undefined)
+                            setPreviewFromTeamId(undefined)
+                          }, 800)
+                        }}
+                      >
+                        Saldırıyı Başlat
+                      </button>
+                    )}
                 </div>
               </div>
               <div className="card p-4">

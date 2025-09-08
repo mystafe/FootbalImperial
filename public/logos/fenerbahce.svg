@@ -1,0 +1,6 @@
+<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="50" cy="50" r="45" fill="#1E3A8A" stroke="#FCD34D" stroke-width="3"/>
+  <text x="50" y="35" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">FB</text>
+  <text x="50" y="50" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="white">1907</text>
+  <text x="50" y="65" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="#FCD34D">FENERBAHÇE</text>
+</svg>

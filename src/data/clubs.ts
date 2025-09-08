@@ -8,6 +8,8 @@ export interface Club {
   color?: string
   colors?: string[]
   overall?: number
+  abbreviation?: string
+  founded?: number
 }
 
 export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
@@ -19,7 +21,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.02,
       color: "#A3262A",
       colors: ["#F4C10F", "#A3262A"],
-      overall: 80
+      overall: 80,
+      abbreviation: "GS",
+      founded: 1905
     },
     {
       name: "Fenerbahçe",
@@ -28,7 +32,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.0214,
       color: "#041E42",
       colors: ["#FEE715", "#041E42"],
-      overall: 79
+      overall: 79,
+      abbreviation: "FB",
+      founded: 1907
     },
     {
       name: "Başakşehir",
@@ -37,7 +43,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.0931,
       color: "#1B3A68",
       colors: ["#1B3A68", "#FF6F00"],
-      overall: 76
+      overall: 76,
+      abbreviation: "BŞ",
+      founded: 1990
     },
     {
       name: "Kasımpaşa",
@@ -46,7 +54,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.044,
       color: "#0046AD",
       colors: ["#0046AD", "#FFFFFF"],
-      overall: 70
+      overall: 70,
+      abbreviation: "KB",
+      founded: 1921
     },
     {
       name: "İstanbulspor",
@@ -55,7 +65,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.06,
       color: "#000000",
       colors: ["#000000", "#FFD200"],
-      overall: 68
+      overall: 68,
+      abbreviation: "İS",
+      founded: 1926
     },
     {
       name: "Karagümrük",
@@ -64,7 +76,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.022,
       color: "#000000",
       colors: ["#000000", "#FF0000"],
-      overall: 69
+      overall: 69,
+      abbreviation: "KG",
+      founded: 1926
     },
     {
       name: "Kayserispor",
@@ -73,7 +87,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 38.7348,
       color: "#D32F2F",
       colors: ["#D32F2F", "#FBC02D"],
-      overall: 71
+      overall: 71,
+      abbreviation: "KY",
+      founded: 1966
     },
     {
       name: "Gaziantep FK",
@@ -82,7 +98,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 37.0662,
       color: "#C62828",
       colors: ["#C62828", "#000000"],
-      overall: 70
+      overall: 70,
+      abbreviation: "GFK",
+      founded: 1988
     },
     {
       name: "Rizespor",
@@ -91,7 +109,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.0201,
       color: "#007F5F",
       colors: ["#007F5F", "#FFFFFF"],
-      overall: 69
+      overall: 69,
+      abbreviation: "RZ",
+      founded: 1953
     },
     {
       name: "MKE Ankaragücü",
@@ -100,7 +120,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 39.9334,
       color: "#0D47A1",
       colors: ["#0D47A1", "#FFD600"],
-      overall: 71
+      overall: 71,
+      abbreviation: "AG",
+      founded: 1910
     },
     {
       name: "Gençlerbirliği",
@@ -109,7 +131,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 39.9334,
       color: "#D50000",
       colors: ["#D50000", "#000000"],
-      overall: 69
+      overall: 69,
+      abbreviation: "GB",
+      founded: 1923
     },
     {
       name: "Beşiktaş",
@@ -118,7 +142,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.039,
       color: "#000000",
       colors: ["#000000", "#FFFFFF"],
-      overall: 78
+      overall: 78,
+      abbreviation: "BJK",
+      founded: 1903
     },
     {
       name: "Trabzonspor",
@@ -127,16 +153,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.0031,
       color: "#7C162E",
       colors: ["#7C162E", "#64B5F6"],
-      overall: 77
-    },
-    {
-      name: "Başakşehir",
-      city: "Istanbul",
-      lon: 28.8076,
-      lat: 41.0931,
-      color: "#1B3A68",
-      colors: ["#1B3A68", "#FF6F00"],
-      overall: 76
+      overall: 77,
+      abbreviation: "TS",
+      founded: 1967
     },
     {
       name: "Adana Demirspor",
@@ -185,39 +204,226 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
     }
   ],
   Italy: [
-    { name: "Juventus", city: "Turin", lon: 7.6869, lat: 45.0703 },
-    { name: "AC Milan", city: "Milan", lon: 9.19, lat: 45.4642 },
-    { name: "Inter", city: "Milan", lon: 9.19, lat: 45.4642 },
-    { name: "Roma", city: "Rome", lon: 12.4964, lat: 41.9028 },
-    { name: "Lazio", city: "Rome", lon: 12.4964, lat: 41.9028 },
-    { name: "Napoli", city: "Naples", lon: 14.2681, lat: 40.8518 },
-    { name: "Fiorentina", city: "Florence", lon: 11.2558, lat: 43.7696 },
-    { name: "Atalanta", city: "Bergamo", lon: 9.6773, lat: 45.6983 }
+    {
+      name: "Juventus",
+      city: "Turin",
+      lon: 7.6869,
+      lat: 45.0703,
+      colors: ["#000000", "#FFFFFF"],
+      abbreviation: "JUV",
+      founded: 1897
+    },
+    {
+      name: "AC Milan",
+      city: "Milan",
+      lon: 9.19,
+      lat: 45.4642,
+      colors: ["#FB090B", "#000000"],
+      abbreviation: "MIL",
+      founded: 1899
+    },
+    {
+      name: "Inter",
+      city: "Milan",
+      lon: 9.19,
+      lat: 45.4642,
+      colors: ["#0068A8", "#000000"],
+      abbreviation: "INT",
+      founded: 1908
+    },
+    {
+      name: "Roma",
+      city: "Rome",
+      lon: 12.4964,
+      lat: 41.9028,
+      colors: ["#8B0000", "#FFD700"],
+      abbreviation: "ROM",
+      founded: 1927
+    },
+    {
+      name: "Lazio",
+      city: "Rome",
+      lon: 12.4964,
+      lat: 41.9028,
+      colors: ["#87CEEB", "#FFFFFF"],
+      abbreviation: "LAZ",
+      founded: 1900
+    },
+    {
+      name: "Napoli",
+      city: "Naples",
+      lon: 14.2681,
+      lat: 40.8518,
+      colors: ["#0066CC", "#FFFFFF"],
+      abbreviation: "NAP",
+      founded: 1926
+    },
+    {
+      name: "Fiorentina",
+      city: "Florence",
+      lon: 11.2558,
+      lat: 43.7696,
+      colors: ["#7B2CBF", "#FFFFFF"],
+      abbreviation: "FIO",
+      founded: 1926
+    },
+    {
+      name: "Atalanta",
+      city: "Bergamo",
+      lon: 9.6773,
+      lat: 45.6983,
+      colors: ["#0000FF", "#000000"],
+      abbreviation: "ATA",
+      founded: 1907
+    }
   ],
   Spain: [
-    { name: "Real Madrid", city: "Madrid", lon: -3.7038, lat: 40.4168 },
-    { name: "Barcelona", city: "Barcelona", lon: 2.1734, lat: 41.3851 },
-    { name: "Atlético Madrid", city: "Madrid", lon: -3.7038, lat: 40.4168 },
-    { name: "Sevilla", city: "Seville", lon: -5.9845, lat: 37.3891 },
-    { name: "Valencia", city: "Valencia", lon: -0.3763, lat: 39.4699 },
-    { name: "Villarreal", city: "Villarreal", lon: -0.1014, lat: 39.937 },
+    {
+      name: "Real Madrid",
+      city: "Madrid",
+      lon: -3.7038,
+      lat: 40.4168,
+      colors: ["#FFFFFF", "#FFD700"],
+      abbreviation: "RMA",
+      founded: 1902
+    },
+    {
+      name: "Barcelona",
+      city: "Barcelona",
+      lon: 2.1734,
+      lat: 41.3851,
+      colors: ["#A50044", "#004D98"],
+      abbreviation: "BAR",
+      founded: 1899
+    },
+    {
+      name: "Atlético Madrid",
+      city: "Madrid",
+      lon: -3.7038,
+      lat: 40.4168,
+      colors: ["#CE1126", "#FFFFFF"],
+      abbreviation: "ATM",
+      founded: 1903
+    },
+    {
+      name: "Sevilla",
+      city: "Seville",
+      lon: -5.9845,
+      lat: 37.3891,
+      colors: ["#FFFFFF", "#FF0000"],
+      abbreviation: "SEV",
+      founded: 1890
+    },
+    {
+      name: "Valencia",
+      city: "Valencia",
+      lon: -0.3763,
+      lat: 39.4699,
+      colors: ["#FF6600", "#000000"],
+      abbreviation: "VAL",
+      founded: 1919
+    },
+    {
+      name: "Villarreal",
+      city: "Villarreal",
+      lon: -0.1014,
+      lat: 39.937,
+      colors: ["#FFD700", "#000000"],
+      abbreviation: "VIL",
+      founded: 1923
+    },
     {
       name: "Real Sociedad",
       city: "San Sebastián",
       lon: -1.9812,
-      lat: 43.3183
+      lat: 43.3183,
+      colors: ["#0033A0", "#FFFFFF"],
+      abbreviation: "RSO",
+      founded: 1909
     },
-    { name: "Athletic Bilbao", city: "Bilbao", lon: -2.935, lat: 43.263 }
+    {
+      name: "Athletic Bilbao",
+      city: "Bilbao",
+      lon: -2.935,
+      lat: 43.263,
+      colors: ["#FF0000", "#FFFFFF"],
+      abbreviation: "ATH",
+      founded: 1898
+    }
   ],
   France: [
-    { name: "PSG", city: "Paris", lon: 2.3522, lat: 48.8566 },
-    { name: "Marseille", city: "Marseille", lon: 5.3698, lat: 43.2965 },
-    { name: "Lyon", city: "Lyon", lon: 4.8357, lat: 45.764 },
-    { name: "Monaco", city: "Monaco", lon: 7.4246, lat: 43.7384 },
-    { name: "Lille", city: "Lille", lon: 3.0573, lat: 50.6292 },
-    { name: "Nice", city: "Nice", lon: 7.2619, lat: 43.7102 },
-    { name: "Saint-Étienne", city: "Saint-Étienne", lon: 4.3872, lat: 45.4397 },
-    { name: "Rennes", city: "Rennes", lon: -1.6778, lat: 48.1173 }
+    {
+      name: "PSG",
+      city: "Paris",
+      lon: 2.3522,
+      lat: 48.8566,
+      colors: ["#004170", "#ED1C24"],
+      abbreviation: "PSG",
+      founded: 1970
+    },
+    {
+      name: "Marseille",
+      city: "Marseille",
+      lon: 5.3698,
+      lat: 43.2965,
+      colors: ["#00A8CC", "#FFFFFF"],
+      abbreviation: "OM",
+      founded: 1899
+    },
+    {
+      name: "Lyon",
+      city: "Lyon",
+      lon: 4.8357,
+      lat: 45.764,
+      colors: ["#FFFFFF", "#0000FF"],
+      abbreviation: "OL",
+      founded: 1950
+    },
+    {
+      name: "Monaco",
+      city: "Monaco",
+      lon: 7.4246,
+      lat: 43.7384,
+      colors: ["#FF0000", "#FFFFFF"],
+      abbreviation: "ASM",
+      founded: 1924
+    },
+    {
+      name: "Lille",
+      city: "Lille",
+      lon: 3.0573,
+      lat: 50.6292,
+      colors: ["#FF0000", "#0000FF"],
+      abbreviation: "LOSC",
+      founded: 1944
+    },
+    {
+      name: "Nice",
+      city: "Nice",
+      lon: 7.2619,
+      lat: 43.7102,
+      colors: ["#FF0000", "#000000"],
+      abbreviation: "OGCN",
+      founded: 1904
+    },
+    {
+      name: "Saint-Étienne",
+      city: "Saint-Étienne",
+      lon: 4.3872,
+      lat: 45.4397,
+      colors: ["#00FF00", "#FFFFFF"],
+      abbreviation: "ASSE",
+      founded: 1919
+    },
+    {
+      name: "Rennes",
+      city: "Rennes",
+      lon: -1.6778,
+      lat: 48.1173,
+      colors: ["#FF0000", "#000000"],
+      abbreviation: "SRFC",
+      founded: 1901
+    }
   ],
   Germany: [
     { name: "Bayern", city: "Munich", lon: 11.582, lat: 48.1351 },

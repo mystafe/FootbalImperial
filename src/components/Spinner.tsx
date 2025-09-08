@@ -80,9 +80,21 @@ export function Spinner({
   return (
     <div
       className="relative mx-auto select-none"
-      style={{ width: sizePx, height: sizePx }}
+      style={{
+        width: sizePx + 20, // Add padding for scale effect
+        height: sizePx + 20,
+        overflow: "visible" // Allow scale effect to show
+      }}
     >
-      <svg className="h-full w-full" viewBox="0 0 100 100">
+      <svg
+        className="h-full w-full"
+        viewBox="0 0 100 100"
+        style={{
+          width: sizePx,
+          height: sizePx,
+          margin: "10px" // Center the SVG within the larger container
+        }}
+      >
         {items.map((label, i) => {
           const start = i * angle - angle / 2
           const end = start + angle

@@ -1,40 +1,37 @@
-// Game Configuration
-// Bu dosyayı değiştirerek oyunun varsayılan ayarlarını kolayca değiştirebilirsiniz
+export interface GameConfig {
+  defaultTeamCount: number
+  defaultCountry: string
+  mapColoring: "solid" | "striped"
+  fastMode: boolean
+  manualMode: boolean
+}
 
-export const GAME_CONFIG = {
-  // Varsayılan takım sayısı
-  DEFAULT_TEAM_COUNT: 5,
+export const defaultConfig: GameConfig = {
+  defaultTeamCount: 4,
+  defaultCountry: "Turkey",
+  mapColoring: "striped",
+  fastMode: false,
+  manualMode: false
+}
 
-  // Varsayılan ülke (Türkiye)
-  DEFAULT_COUNTRY: "Turkey",
+// Load config from localStorage or use defaults
+export const loadConfig = (): GameConfig => {
+  try {
+    const saved = localStorage.getItem("football-imperial-config")
+    if (saved) {
+      return { ...defaultConfig, ...JSON.parse(saved) }
+    }
+  } catch (error) {
+    console.warn("Failed to load config from localStorage:", error)
+  }
+  return defaultConfig
+}
 
-  // Diğer ayarlar
-  MIN_TEAMS: 2,
-  MAX_TEAMS: 8,
-
-  // Desteklenen ülkeler (store'daki CountryKey ile uyumlu)
-  SUPPORTED_COUNTRIES: [
-    "Turkey",
-    "Italy",
-    "Spain",
-    "France",
-    "Germany",
-    "Portugal",
-    "Netherlands",
-    "England"
-  ] as const,
-
-  // Ülke isimleri
-  COUNTRY_NAMES: {
-    Turkey: "Türkiye",
-    Italy: "İtalya",
-    Spain: "İspanya",
-    France: "Fransa",
-    Germany: "Almanya",
-    Portugal: "Portekiz",
-    Netherlands: "Hollanda",
-    England: "İngiltere"
-  } as const
-} as const
-
-export type SupportedCountry = (typeof GAME_CONFIG.SUPPORTED_COUNTRIES)[number]
+// Save config to localStorage
+export const saveConfig = (config: GameConfig): void => {
+  try {
+    localStorage.setItem("football-imperial-config", JSON.stringify(config))
+  } catch (error) {
+    console.warn("Failed to save config to localStorage:", error)
+  }
+}

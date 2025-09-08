@@ -1,7 +1,6 @@
 import { create } from "zustand"
 import { createRng } from "../lib/random"
 import { BALANCE } from "../data/balance"
-import { GAME_CONFIG } from "../config/game"
 
 export type Direction = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW"
 
@@ -40,6 +39,7 @@ export interface HistoryItem {
 interface GameState {
   selectedCountry: CountryKey
   numTeams: number
+  mapColoring: "solid" | "striped"
   seed: string
   turn: number
   gameStarted?: boolean
@@ -61,6 +61,7 @@ interface GameState {
   setSeed: (seed: string) => void
   setCountry: (c: CountryKey) => void
   setNumTeams: (n: number) => void
+  setMapColoring: (coloring: "solid" | "striped") => void
   setTeamsAndCells: (teams: Team[], cells: Cell[]) => void
   setGameStarted?: (started: boolean) => void
   setPreviewTarget: (fromCellId?: number, toCellId?: number) => void
@@ -115,8 +116,9 @@ export const DIRECTIONS: Direction[] = [
 ]
 
 export const useGameStore = create<GameState>((set, get) => ({
-  selectedCountry: GAME_CONFIG.DEFAULT_COUNTRY,
-  numTeams: GAME_CONFIG.DEFAULT_TEAM_COUNT,
+  selectedCountry: "Turkey" as CountryKey,
+  numTeams: 4,
+  mapColoring: "striped" as "solid" | "striped",
   seed: "demo",
   turn: 0,
   maxTurns: 500,
@@ -134,6 +136,8 @@ export const useGameStore = create<GameState>((set, get) => ({
   setCountry: (c: CountryKey) => set({ selectedCountry: c }),
   setNumTeams: (n: number) =>
     set({ numTeams: Math.max(2, Math.min(25, Math.floor(n))) }),
+  setMapColoring: (coloring: "solid" | "striped") =>
+    set({ mapColoring: coloring }),
   setTeamsAndCells: (teamsIn: Team[], cellsIn: Cell[]) =>
     set((state) => {
       // initialize forms and capitals
@@ -141,19 +145,21 @@ export const useGameStore = create<GameState>((set, get) => ({
         `${state.seed}:init:${state.selectedCountry}:${state.numTeams}`
       )
       const teams = teamsIn.map((t) => ({ ...t, form: 1 }))
-      // assign each team a capital: closest cell to its initial centroid (same id mapping at start)
-      const assignedTeams = teams.map((t) => ({ ...t, capitalCellId: t.id }))
-
-      // mark neutrals: pick ~share of cells that are not capitals and not initial team cells
+      // First, assign initial team cells and mark neutrals
       const total = cellsIn.length
       const targetNeutral = Math.floor(total * BALANCE.neutrals.share)
       const neutralIds = new Set<number>()
-      const excluded = new Set<number>(
-        assignedTeams.map((t) => t.capitalCellId as number)
-      )
+      const teamCellIds = new Set<number>()
+
+      // Reserve team IDs as initial team cells
+      teams.forEach((t) => {
+        teamCellIds.add(t.id)
+      })
+
+      // Mark neutrals: pick cells that are not team cells
       const candidates = cellsIn
         .map((c) => c.id)
-        .filter((id) => !excluded.has(id))
+        .filter((id) => !teamCellIds.has(id))
       for (
         let i = 0;
         i < candidates.length && neutralIds.size < targetNeutral;
@@ -162,9 +168,26 @@ export const useGameStore = create<GameState>((set, get) => ({
         const pickIndex = Math.floor(rng() * candidates.length)
         neutralIds.add(candidates[pickIndex])
       }
-      const cells = cellsIn.map((c) =>
-        neutralIds.has(c.id) ? { ...c, ownerTeamId: -1 } : c
-      )
+
+      // Create cells with proper ownership
+      const cells = cellsIn.map((c) => {
+        if (neutralIds.has(c.id)) {
+          return { ...c, ownerTeamId: -1 }
+        } else if (teamCellIds.has(c.id)) {
+          return { ...c, ownerTeamId: c.id } // Team owns cell with same ID
+        } else {
+          return { ...c, ownerTeamId: c.id } // Default: team owns cell with same ID
+        }
+      })
+
+      // Now assign capitals: each team's capital is the cell with same ID
+      const assignedTeams = teams.map((t) => {
+        const capitalCellId = t.id
+        console.log(
+          `Team ${t.name} (ID: ${t.id}) assigned capital cell: ${capitalCellId}`
+        )
+        return { ...t, capitalCellId }
+      })
 
       return {
         teams: assignedTeams,
@@ -300,7 +323,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       if (d < -180) d += 360
       return Math.abs(d)
     }
-    const toDeg = (x: number, y: number) => (Math.atan2(-y, x) * 180) / Math.PI
+    const toDeg = (x: number, y: number) => (Math.atan2(y, x) * 180) / Math.PI
     const tolerance = 60
     let bestAlong = Infinity
     let bestPerp = Infinity
@@ -401,6 +424,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             JSON.stringify({
               selectedCountry: nextState.selectedCountry,
               numTeams: nextState.numTeams,
+              mapColoring: nextState.mapColoring,
               seed: nextState.seed,
               turn: nextState.turn,
               teams: nextState.teams,
@@ -555,6 +579,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           JSON.stringify({
             selectedCountry: nextState.selectedCountry,
             numTeams: nextState.numTeams,
+            mapColoring: nextState.mapColoring,
             seed: nextState.seed,
             turn: nextState.turn,
             teams: nextState.teams,
@@ -637,6 +662,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           ...state,
           selectedCountry: parsed.selectedCountry ?? state.selectedCountry,
           numTeams: parsed.numTeams ?? state.numTeams,
+          mapColoring: parsed.mapColoring ?? state.mapColoring,
           seed: parsed.seed ?? state.seed,
           turn: parsed.turn ?? 0,
           teams: parsed.teams ?? [],

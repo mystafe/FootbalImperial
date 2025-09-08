@@ -24,6 +24,7 @@ const COUNTRY_NAME_TO_ID: Record<string, number | undefined> = {
 export default function MapView() {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
+  const mapColoring = useGameStore((s) => s.mapColoring)
   const seed = useGameStore((s) => s.seed)
   const setTeamsAndCells = useGameStore((s) => s.setTeamsAndCells)
   const snapIdx = useGameStore((s) => (s as { frozenSnapshotIndex?: number }).frozenSnapshotIndex)
@@ -34,6 +35,8 @@ export default function MapView() {
   const previewFrom = useGameStore((s) => (s as { previewFromCellId?: number }).previewFromCellId)
   const previewTo = useGameStore((s) => (s as { previewToCellId?: number }).previewToCellId)
   const previewFromTeamId = useGameStore((s) => (s as { previewFromTeamId?: number }).previewFromTeamId)
+  
+  // Game state variables removed - no longer needed for borders
   const svgRef = useRef<SVGSVGElement | null>(null)
   // overlay suppression flag read at use-time via getState() to avoid re-render triggers
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 900, h: 600 })
@@ -200,7 +203,7 @@ export default function MapView() {
     } catch (error) {
       console.error('Error initializing map:', error)
     }
-  }, [voronoiPolys, teamColors, points, setTeamsAndCells, selected, numTeams, size.w, size.h, seed, teams.length, storeCells.length])
+  }, [voronoiPolys, teamColors, points, setTeamsAndCells, selected, numTeams, mapColoring, size.w, size.h, seed, teams.length, storeCells.length])
 
   return (
     <div className="w-full h-full">
@@ -223,15 +226,16 @@ export default function MapView() {
             if (!dual) return null
             return (
               <pattern
-                key={`pat-${(t as { id: number }).id}-${turn}`}
-                id={`team-stripe-${(t as { id: number }).id}-${turn}`}
+                key={`pat-${(t as { id: number }).id}`}
+                id={`team-stripe-${(t as { id: number }).id}`}
                 patternUnits="userSpaceOnUse"
-                width="24"
-                height="24"
+                width="40"
+                height="40"
                 patternTransform="rotate(35)"
+                patternContentUnits="userSpaceOnUse"
               >
-                <rect width="24" height="24" fill={dual[0]} />
-                <rect x="0" y="0" width="12" height="24" fill={dual[1]} />
+                <rect width="40" height="40" fill={dual[0]} />
+                <rect x="0" y="0" width="20" height="40" fill={dual[1]} />
               </pattern>
             )
           })}
@@ -261,17 +265,25 @@ export default function MapView() {
               console.warn(`Voronoi poly ${i} is null`)
               return null
             }
-            const cell = storeCells[i]
+            // Find cell by ID instead of index
+            const cell = storeCells.find(c => (c as { id: number }).id === i)
             if (!cell) {
+              // Skip rendering if store cells not ready yet
+              if (storeCells.length === 0) {
+                return null
+              }
               console.warn(`No cell found for voronoi poly ${i}, using neutral`)
+              console.log(`Available cell IDs: [${storeCells.map(c => (c as { id: number }).id).join(', ')}]`)
+              console.log(`Voronoi poly count: ${voronoiPolys.length}, Store cells count: ${storeCells.length}`)
               return (
                 <g key={`cell-${i}-neutral`}>
                   <motion.path
                     d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
                     fill={BALANCE.neutrals.color}
-                    stroke="#64748b"
-                    strokeWidth={0.5}
-                    opacity={0.5}
+                    stroke="none"
+                    strokeWidth={0}
+                    initial={{ opacity: 0.5 }}
+                    animate={{ opacity: 0.5 }}
                   />
                 </g>
               )
@@ -279,10 +291,8 @@ export default function MapView() {
             const owner = teams.find((t) => (t as { id: number }).id === (cell as { ownerTeamId: number }).ownerTeamId)
             const last = history[history.length - 1]
             const isCaptured = last && last.targetCellId === (cell as { id: number }).id
-            const isFrom = last && last.fromCellId === (cell as { id: number }).id
-            const isTo = last && last.targetCellId === (cell as { id: number }).id
-            const isAttacker = isFrom && last?.attackerWon !== false
-            const isDefender = isTo && last?.attackerWon === false
+            // isFrom and isTo removed - no longer needed
+            // isAttacker and isDefender removed - no longer needed
             const isDefenderTeam = last && last.defenderTeamId != null && (cell as { ownerTeamId: number }).ownerTeamId === last.defenderTeamId
             const isNeutral = (cell as { ownerTeamId: number }).ownerTeamId === -1 || (cell as { ownerTeamId: number }).ownerTeamId == null
             const isPreviewFrom = previewFrom === (cell as { id: number }).id
@@ -290,7 +300,7 @@ export default function MapView() {
             const ownerId = owner ? (owner as { id: number }).id : 'neutral'
             // lookup dual colors
             const club = owner ? (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (owner as { name: string }).name) : undefined
-            const dual = club?.colors
+            const dual = mapColoring === "striped" && club?.colors
             // fillUrl removed; team-wide patterns are defined in <defs>
             return (
               <g key={`cell-${i}-${ownerId}-${turn}`}>
@@ -300,36 +310,13 @@ export default function MapView() {
                   fill={
                     isNeutral
                       ? BALANCE.neutrals.color
-                      : isPreviewTo || isDefenderTeam
-                      ? "#3b82f6"
-                      : previewFromTeamId!=null && (owner as { id: number })?.id === previewFromTeamId
-                      ? "#ef4444"
                       : dual
-                      ? `url(#team-stripe-${(owner as { id: number })?.id}-${turn})`
+                      ? `url(#team-stripe-${(owner as { id: number })?.id})`
                       : ((owner as { color?: string })?.color || "#ddd")
                   }
-                  stroke={
-                    isPreviewTo || isDefenderTeam
-                      ? "#3b82f6"
-                      : isPreviewFrom
-                      ? "#ef4444"
-                      : previewFromTeamId!=null && (owner as { id: number })?.id === previewFromTeamId
-                      ? "#ef4444"
-                      : isAttacker
-                      ? "#ef4444"
-                      : isCaptured
-                      ? "#f59e0b"
-                      : "none"
-                  }
-                  strokeWidth={
-                    isPreviewTo || isPreviewFrom || isDefenderTeam || (previewFromTeamId!=null && (owner as { id: number })?.id === previewFromTeamId)
-                      ? 4
-                      : isDefender || isAttacker
-                      ? 2.6
-                      : isCaptured
-                      ? 1.6
-                      : 0
-                  }
+                  stroke="none"
+                  strokeWidth={0}
+                  initial={{ opacity: isNeutral ? 0.5 : 0.95, scale: 1 }}
                   animate={
                     isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam || (previewFromTeamId!=null && (owner as { id: number })?.id === previewFromTeamId)
                       ? { opacity: 1, scale: 1.12 }
@@ -340,13 +327,6 @@ export default function MapView() {
                   <title>{`${(owner as { name?: string })?.name ?? (isNeutral ? 'Neutral' : 'Team')} • cell ${(cell as { id: number }).id}`}</title>
                 </motion.path>
                 {/* Team label moved to overlay to ensure topmost layering */}
-                {/* Capital icon */}
-                {!isNeutral && (owner as { capitalCellId?: number })?.capitalCellId === (cell as { id: number }).id && (
-                  <g transform={`translate(${(cell as { centroid: [number, number] }).centroid[0]-6}, ${(cell as { centroid: [number, number] }).centroid[1]-14})`}>
-                    <circle cx="6" cy="10" r="6" fill="#111827" stroke="#fbbf24" strokeWidth="1" />
-                    <path d="M6 0 L7.8 3.6 L11.8 4.2 L8.9 6.9 L9.6 10.8 L6 9 L2.4 10.8 L3.1 6.9 L0.2 4.2 L4.2 3.6 Z" fill="#fbbf24" />
-                  </g>
-                )}
               </g>
             )
           })}
@@ -359,76 +339,71 @@ export default function MapView() {
             const to = storeCells.find((c) => (c as { id: number }).id === toId)
             if (!from || !to) return null
             
-            // Use the actual attacking cell's centroid for more accurate arrow origin
-            const attackerCenter = (from as { centroid: [number, number] }).centroid
+            // Find the attacking team's centroid (not just the from cell)
+            const attackerTeamId = last?.attackerTeamId
+            const attackerCells = storeCells.filter((c) => (c as { ownerTeamId: number }).ownerTeamId === attackerTeamId)
+            
+            console.log(`🎯 Debug: attackerTeamId=${attackerTeamId}, attackerCells.length=${attackerCells.length}`)
+            
+            // Fallback to from cell if attacker cells not found
+            let attackerCenter: [number, number]
+            if (attackerCells.length === 0) {
+              console.log(`🎯 Fallback: Using from cell centroid`)
+              attackerCenter = (from as { centroid: [number, number] }).centroid
+            } else {
+              // Calculate attacker's center from all their cells
+              const sumX = attackerCells.reduce((sum: number, cell) => sum + (cell as { centroid: [number, number] }).centroid[0], 0)
+              const sumY = attackerCells.reduce((sum: number, cell) => sum + (cell as { centroid: [number, number] }).centroid[1], 0)
+              attackerCenter = [sumX / attackerCells.length, sumY / attackerCells.length]
+            }
+            
+            console.log(`🎯 Attacker Center: (${attackerCenter[0].toFixed(1)}, ${attackerCenter[1].toFixed(1)})`)
             
             const [sx, sy] = attackerCenter
-            const [tx, ty] = (to as { centroid: [number, number] }).centroid
-            const mx = (sx + tx) / 2
-            const my = (sy + ty) / 2 - 24
-            const attacker = teams.find((t) => (t as { id: number }).id === last?.attackerTeamId)
-            const label = last ? `${(attacker as { name?: string })?.name?.slice(0,3).toUpperCase()} • ${last.direction}` : `ATAK`
-            const lw = Math.max(70, label.length * 6 + 18)
-            const lh = 18
+            
+            // Get the selected direction from history
+            const selectedDirection = last?.direction || 'S'
+            console.log(`🎯 Attack arrow direction: ${selectedDirection}`)
+            
+            // Calculate direction vector based on selected direction
+            const dirAngle: Record<string, number> = {
+              E: 0,
+              NE: 45,
+              N: 90,
+              NW: 135,
+              W: 180,
+              SW: -135,
+              S: -90,
+              SE: -45
+            }
+            
+            const deg = dirAngle[selectedDirection] || -90
+            const ang = (deg * Math.PI) / 180
+            const ndx = Math.cos(-ang)
+            const ndy = Math.sin(-ang)
+            
+            // Calculate arrow end point based on selected direction
+            const arrowLength = 80 // Fixed arrow length
+            const ex = sx + ndx * arrowLength
+            const ey = sy + ndy * arrowLength
+            
+            console.log(`🎯 Arrow: Start(${sx.toFixed(1)}, ${sy.toFixed(1)}) → End(${ex.toFixed(1)}, ${ey.toFixed(1)})`)
+            
+            const mx = (sx + ex) / 2
+            const my = (sy + ey) / 2 - 24
+            // attacker removed - no longer needed for arrows
+            // label removed - no longer needed for arrows
+            // lw and lh removed - no longer needed for arrows
 
             // Quadratic curve control point (above midpoint)
             const cx = mx
             const cy = my
-            const pathD = `M ${sx} ${sy} Q ${cx} ${cy} ${tx} ${ty}`
+            const pathD = `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}`
+            
+            console.log(`🎯 Arrow path: ${pathD}`)
 
-            return (
-              <g>
-                <defs>
-                  <linearGradient id="arrowGrad" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#f97316" />
-                    <stop offset="50%" stopColor="#ef4444" />
-                    <stop offset="100%" stopColor="#dc2626" />
-                  </linearGradient>
-                  <marker id="arrowHead2" markerWidth="12" markerHeight="12" refX="10" refY="4" orient="auto">
-                    <polygon points="0 0, 10 4, 0 8" fill="#dc2626" stroke="#ef4444" strokeWidth="0.5" />
-                  </marker>
-                  <filter id="glow">
-                    <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-                    <feMerge> 
-                      <feMergeNode in="coloredBlur"/>
-                      <feMergeNode in="SourceGraphic"/>
-                    </feMerge>
-                  </filter>
-                </defs>
-                <motion.path d={pathD} fill="none" stroke="#0b1220" strokeWidth={6}
-                  initial={{ opacity: 0, pathLength: 0 }}
-                  animate={{ opacity: 0.8, pathLength: 1 }}
-                  transition={{ duration: 0.6 }}
-                  filter="url(#glow)"
-                />
-                <motion.path d={pathD} fill="none" stroke="url(#arrowGrad)" strokeWidth={4}
-                  initial={{ opacity: 0, pathLength: 0 }}
-                  animate={{ opacity: 1, pathLength: 1 }}
-                  transition={{ duration: 0.6, delay: 0.1 }}
-                  markerEnd="url(#arrowHead2)" />
-                <motion.rect x={mx - lw/2} y={my - lh - 6} rx={6} ry={6} width={lw} height={lh}
-                  fill="#0b1220" stroke="#ef4444" strokeWidth={0.8} opacity={0.95}
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 0.95, scale: 1 }}
-                  transition={{ delay: 0.12, duration: 0.2 }}
-                />
-                {/* remove mid label to keep only team names on map */}
-                {/* WIN/LOSE badge near target (only when not previewing) */}
-                {last && !(previewFrom!=null && previewTo!=null) && (
-                  <>
-                    <motion.rect x={tx + 8} y={ty - 18} rx={4} ry={4} width={44} height={16}
-                      fill="#111827" opacity={0.95}
-                      initial={{ opacity: 0, x: 0 }}
-                      animate={{ opacity: 0.95, x: 0 }}
-                      transition={{ duration: 0.2 }}
-                    />
-                    <text x={tx + 30} y={ty - 6} textAnchor="middle" fontSize={10} fill="#fff">
-                      {last.attackerWon ? 'WIN' : 'LOSE'}
-                    </text>
-                  </>
-                )}
-              </g>
-            )
+            // Attack arrows removed - no longer needed
+            return null
           })()}
         </g>
         {/* Team labels overlay - topmost */}
@@ -444,27 +419,210 @@ export default function MapView() {
               })
               .filter((item): item is { poly: [number, number][]; centroid: [number, number] } => item !== null)
             if (owned.length === 0) return null
-            const sum = owned.reduce((acc: [number, number], item) => {
-              const nx = acc[0] + item.centroid[0]
-              const ny = acc[1] + item.centroid[1]
-              return [nx, ny] as [number, number]
-            }, [0, 0] as [number, number])
-            const x = sum[0] / owned.length
-            const y = sum[1] / owned.length
-            const label = (t as { name: string }).name
-            const lw = Math.max(32, label.length * 7 + 16)
-            const lh = 20
-            return (
-              <g key={`label-${(t as { id: number }).id}`}>
-                <rect x={x - lw/2} y={y - lh/2} rx={8} ry={8} width={lw} height={lh} fill="#0b1220" opacity={0.92} />
-                <text x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={800} fill="#f8fafc">
-                  {label}
-                </text>
-              </g>
-            )
+            // sum calculation removed - no longer needed for labels
+            // Team labels removed - will show as tooltips on logo hover
+            return null
           })}
         </g>
+        
+        {/* Team logos - rendered last for proper z-index */}
+        {teams.map((team) => {
+          const teamId = (team as { id: number }).id
+          const teamName = (team as { name?: string })?.name
+          const club = (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === teamName)
+          
+          // Find all cells owned by this team
+          const teamCells = storeCells.filter((cell) => (cell as { ownerTeamId: number }).ownerTeamId === teamId)
+          if (teamCells.length === 0) {
+            return null
+          }
+          
+          // Find the best position for logo within team territories
+          const findBestLogoPosition = (cells: unknown[]): [number, number] => {
+            if (cells.length === 1) {
+              // Single cell: use voronoi poly centroid directly
+              const cell = cells[0] as { id: number }
+              const voronoiPoly = voronoiPolys[cell.id]
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                // Calculate centroid of the voronoi polygon
+                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+                return [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
+              }
+              // Fallback to cell centroid if voronoi poly not found
+              return (cell as unknown as { centroid: [number, number] }).centroid
+            }
+            
+            // Multiple cells: find the cell that's most central to the team's territory
+            const cellsWithData = cells as { id: number }[]
+            
+            // Calculate the geometric center of all team cells using voronoi poly centroids
+            let totalX = 0
+            let totalY = 0
+            let validPolys = 0
+            
+            for (const cell of cellsWithData) {
+              const voronoiPoly = voronoiPolys[cell.id]
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+                totalX += sumX / voronoiPoly.length
+                totalY += sumY / voronoiPoly.length
+                validPolys++
+              }
+            }
+            
+            if (validPolys === 0) {
+              // Fallback to first cell centroid
+              return (cellsWithData[0] as unknown as { centroid: [number, number] }).centroid
+            }
+            
+            const geometricCenter: [number, number] = [totalX / validPolys, totalY / validPolys]
+            
+            // Find the cell whose voronoi poly centroid is closest to the geometric center
+            let bestCell = cellsWithData[0]
+            let minDistance = Infinity
+            
+            for (const cell of cellsWithData) {
+              const voronoiPoly = voronoiPolys[cell.id]
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+                const centroid = [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
+                
+                const dx = centroid[0] - geometricCenter[0]
+                const dy = centroid[1] - geometricCenter[1]
+                const distance = Math.sqrt(dx * dx + dy * dy)
+                
+                if (distance < minDistance) {
+                  minDistance = distance
+                  bestCell = cell
+                }
+              }
+            }
+            
+            // Return the voronoi poly centroid of the most central cell
+            const bestVoronoiPoly = voronoiPolys[bestCell.id]
+            if (bestVoronoiPoly && bestVoronoiPoly.length > 0) {
+              const sumX = bestVoronoiPoly.reduce((sum, point) => sum + point[0], 0)
+              const sumY = bestVoronoiPoly.reduce((sum, point) => sum + point[1], 0)
+              return [sumX / bestVoronoiPoly.length, sumY / bestVoronoiPoly.length]
+            }
+            
+            // Fallback to cell centroid
+            return (bestCell as unknown as { centroid: [number, number] }).centroid
+          }
+          
+          const logoPosition = findBestLogoPosition(teamCells)
+          const centerX = logoPosition[0]
+          let centerY = logoPosition[1]
+          
+          // Special adjustment for Başakşehir (logo appearing too low)
+          if (teamName === 'Başakşehir') {
+            centerY = centerY - 50 // Move logo up by 50px (more aggressive)
+            console.log(`🔧 Başakşehir logo adjusted: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
+          }
+          
+          // Detailed debug for logo positioning (only on first render)
+          if (turn === 0) {
+            console.log(`\n=== ${teamName} LOGO ANALYSIS ===`)
+            console.log(`Team ID: ${teamId}`)
+            console.log(`Team cells: ${teamCells.length}`)
+            
+            // Show all team cells with their centroids and voronoi poly info
+            teamCells.forEach((cell, idx) => {
+              const cellData = cell as { id: number, centroid: [number, number] }
+              const voronoiPoly = voronoiPolys[cellData.id]
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+                const voronoiCentroid = [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
+                console.log(`  Cell ${idx}: ID=${cellData.id}, CellCentroid=(${cellData.centroid[0].toFixed(1)}, ${cellData.centroid[1].toFixed(1)}), VoronoiCentroid=(${voronoiCentroid[0].toFixed(1)}, ${voronoiCentroid[1].toFixed(1)})`)
+              } else {
+                console.log(`  Cell ${idx}: ID=${cellData.id}, Centroid=(${cellData.centroid[0].toFixed(1)}, ${cellData.centroid[1].toFixed(1)}), VoronoiPoly=NOT_FOUND`)
+              }
+            })
+            
+            console.log(`Final logo position: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
+            console.log(`=== END ${teamName} ANALYSIS ===\n`)
+          }
+          
+          // CSS logo generation - no need for SVG paths
+          const centroid: [number, number] = [centerX, centerY]
+          
+          // Debug logo position for Başakşehir
+          if (teamName === 'Başakşehir') {
+            console.log(`🎯 Başakşehir logo position: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
+            console.log(`🎯 Başakşehir logo transform: translate(${(centerX-16).toFixed(1)}, ${(centerY-16).toFixed(1)})`)
+          }
+          
+          return (
+            <g key={`logo-${teamId}-${turn}`} transform={`translate(${centroid[0]-32}, ${centroid[1]-32})`}>
+              <title>{teamName}</title>
+              <foreignObject width="64" height="64" x="0" y="0">
+                <div 
+                  style={{
+                    width: '64px',
+                    height: '64px',
+                    borderRadius: '50%',
+                    background: `linear-gradient(135deg, ${club?.colors?.[0] || '#666'}, ${club?.colors?.[1] || '#999'})`,
+                    border: '3px solid #fff',
+                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {/* Inner circle */}
+                  <div 
+                    style={{
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '50%',
+                      background: club?.colors?.[1] || '#999',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: '2px solid #fff'
+                    }}
+                  >
+                    {/* Team abbreviation */}
+                    <div 
+                      style={{
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                        color: '#fff',
+                        textShadow: '1px 1px 2px rgba(0,0,0,0.7)',
+                        lineHeight: '1'
+                      }}
+                    >
+                      {club?.abbreviation || (teamName || 'TM').slice(0, 2).toUpperCase()}
+                    </div>
+                    {/* Founded year */}
+                    <div 
+                      style={{
+                        fontSize: '8px',
+                        color: '#fff',
+                        textShadow: '1px 1px 2px rgba(0,0,0,0.7)',
+                        lineHeight: '1',
+                        marginTop: '2px'
+                      }}
+                    >
+                      {club?.founded || '1900'}
+                    </div>
+                  </div>
+                </div>
+              </foreignObject>
+            </g>
+          )
+        })}
       </svg>
     </div>
   )
 }
+
