@@ -5,7 +5,7 @@ import MapView from "./components/Map"
 import { useGameStore, DIRECTIONS, COUNTRIES } from "./store/game"
 import { createRng, weightedChoice } from "./lib/random"
 import { playCapture, playClick, playVictory, playDefeat } from "./lib/sound"
-import { motion } from "framer-motion"
+import { AnimatePresence, motion } from "framer-motion"
 import { loadConfig, saveConfig, type GameConfig } from "./config/game"
 
 function App() {
@@ -328,11 +328,53 @@ function App() {
 
   return (
     <div>
-      {toast && (
-        <div className="fixed left-1/2 top-8 z-50 -translate-x-1/2 rounded-lg border border-slate-700 bg-slate-800/90 px-5 py-3 text-base font-semibold text-white shadow-lg backdrop-blur">
-          {toast}
-        </div>
-      )}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key="toast"
+            initial={{ opacity: 0, y: -28, scale: 0.92 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -28, scale: 0.92 }}
+            transition={{ type: "spring", stiffness: 280, damping: 22 }}
+            className="fixed left-1/2 top-8 z-50 -translate-x-1/2"
+          >
+            <motion.div
+              className="relative overflow-visible rounded-2xl border border-emerald-400/40 bg-slate-900/95 px-6 py-4 text-base font-semibold text-white shadow-[0_0_20px_rgba(16,185,129,0.25)] backdrop-blur"
+              animate={{
+                boxShadow: [
+                  "0 0 20px rgba(16,185,129,0.25)",
+                  "0 0 34px rgba(248,250,252,0.35)",
+                  "0 0 20px rgba(16,185,129,0.25)"
+                ]
+              }}
+              transition={{ duration: 2.4, repeat: Infinity, repeatType: "mirror" }}
+            >
+              <motion.span
+                className="pointer-events-none absolute -inset-10 -z-10 rounded-full bg-gradient-to-r from-emerald-400/30 via-amber-300/20 to-transparent blur-3xl"
+                animate={{ rotate: [0, 12, -12, 0] }}
+                transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+              />
+              <div className="relative flex items-center gap-3">
+                <motion.span
+                  aria-hidden
+                  className="text-2xl"
+                  animate={{ scale: [1, 1.2, 1], rotate: [0, -12, 12, 0] }}
+                  transition={{ duration: 1.4, repeat: Infinity, repeatType: "mirror" }}
+                >
+                  🏆
+                </motion.span>
+                <motion.span
+                  className="leading-tight"
+                  animate={{ color: ["#f8fafc", "#bbf7d0", "#f8fafc"] }}
+                  transition={{ duration: 1.8, repeat: Infinity, repeatType: "mirror" }}
+                >
+                  {toast}
+                </motion.span>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="w-full p-0">
         <header className="text-center">
           <h1 className="text-5xl font-bold tracking-tighter gradient-text animate-fade-in-up">
@@ -496,7 +538,7 @@ function App() {
             </div>
 
             <div className="flex flex-col gap-4 lg:col-span-4">
-              <div className="card p-4 overflow-hidden">
+              <div className="card overflow-visible p-4">
                 <h2 className="mb-3 text-lg font-semibold text-white">
                   Tur {turn + 1}
                 </h2>
