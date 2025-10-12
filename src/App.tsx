@@ -59,6 +59,7 @@ function App() {
 
   const [teamWinner, setTeamWinner] = useState<number | null>(null)
   const [dirWinner, setDirWinner] = useState<number | null>(null)
+  const [actualDirection, setActualDirection] = useState<string | null>(null)
   const [uiStep, setUiStep] = useState<
     "team" | "dir" | "dir-select" | "attack-confirm" | "attacking" | null
   >(null)
@@ -122,8 +123,7 @@ function App() {
       dirWinner !== null &&
       uiStep === "attack-confirm"
     ) {
-      const liveTeams = teams.filter((t) => t.alive)
-      const attackerTeam = liveTeams[teamWinner]
+      const attackerTeam = teams.find(t => t.id === teamWinner)
       const direction = DIRECTIONS[dirWinner]
       if (!attackerTeam) return
 
@@ -228,7 +228,7 @@ function App() {
   }
 
   const isGameOver = liveTeams.length <= 1 && liveTeams.length > 0
-  const attackerTeam = teamWinner != null ? liveTeams[teamWinner] : undefined
+  const attackerTeam = teamWinner != null ? teams.find(t => t.id === teamWinner) : undefined
 
 
   return (
@@ -615,7 +615,7 @@ function App() {
                     {dirWinner !== null && (
                       <div className="inline-flex items-center gap-2 rounded-lg bg-slate-700/60 px-3 py-1 text-sm">
                         <span className="font-semibold">Yön:</span>
-                        <span>{DIR_TR[DIRECTIONS[dirWinner]]}</span>
+                        <span>{actualDirection ? DIR_TR[actualDirection] : DIR_TR[DIRECTIONS[dirWinner]]}</span>
                       </div>
                     )}
                   </motion.div>
@@ -655,8 +655,11 @@ function App() {
                         winnerIndex={teamSpinTarget}
                         fullNames={teamItems.length ? teamItems : undefined}
                         onDone={(i) => {
-                          setTeamWinner(i)
                           const attacker = liveTeams[i]
+                          setTeamWinner(attacker.id) // Use team ID instead of array index
+                          
+                          // Play selection sound
+                          playClick()
                           
                           // Show announcement
                           setAnnouncement(`⚔️ Saldıran: ${attacker.name}`)
@@ -689,7 +692,9 @@ function App() {
                       <button
                         onClick={() => {
                           setUiStep("dir")
-                              const attacker = liveTeams[teamWinner]
+                          const attacker = teams.find(t => t.id === teamWinner)
+                          if (!attacker) return
+                          
                           
                           // Find a valid target by trying directions until we find one
                           let targetDirIndex = -1
@@ -709,7 +714,7 @@ function App() {
                                   return
                                 }
 
-                          // Calculate target angle based on actual target position
+                          // Calculate the actual direction from attacker to target
                           const attackerCells = cells.filter((c) => c.ownerTeamId === attacker.id)
                           if (attackerCells.length === 0) return
                           
@@ -726,10 +731,26 @@ function App() {
                           
                           const [tx, ty] = targetCell.centroid
                           
-                          // Calculate angle from attacker to target
+                          // Calculate actual angle from attacker to target
                           const dx = tx - ax
                           const dy = ty - ay
                           const targetAngle = (Math.atan2(dy, dx) * 180) / Math.PI
+                          
+                          // Find the closest direction to the actual target angle
+                          const dirAngle: Record<string, number> = {
+                            E: 0, NE: 45, N: 90, NW: 135, W: 180, 
+                            SW: -135, S: -90, SE: -45
+                          }
+                          let closestDirection = "E"
+                          let minDiff = Infinity
+                          for (const [dir, angle] of Object.entries(dirAngle)) {
+                            const diff = Math.abs(((targetAngle - angle + 180) % 360) - 180)
+                            if (diff < minDiff) {
+                              minDiff = diff
+                              closestDirection = dir
+                            }
+                          }
+                          setActualDirection(closestDirection)
                           
                           // Start rotation animation
                           setRotatingArrow(attacker.id, 0)
@@ -751,7 +772,7 @@ function App() {
                               setRotatingArrow(attacker.id, targetAngle)
                               
                               // Use the pre-calculated target
-                                setTimeout(() => {
+                                  setTimeout(() => {
 
                                 // Activate beam animation
                                 setBeam(true, targetResult.toCellId)
@@ -800,7 +821,7 @@ function App() {
                         disabled={disabledApplyBtn}
                         onClick={() => {
                           if (teamWinner == null || dirWinner == null) return
-                          const attackerTeam = liveTeams[teamWinner]
+                          const attackerTeam = teams.find(t => t.id === teamWinner)
                           const dir = DIRECTIONS[dirWinner] as Direction
                           if (!attackerTeam) return
                           playClick()
@@ -836,6 +857,7 @@ function App() {
                             setUiStep(null)
                             setTeamWinner(null)
                             setDirWinner(null)
+                            setActualDirection(null)
                             setTeamSpinTarget(undefined)
                             setShowAttackerInfo(false)
                             setShowDefenderInfo(false)

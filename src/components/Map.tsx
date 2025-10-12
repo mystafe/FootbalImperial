@@ -294,10 +294,11 @@ export default function MapView() {
             
             // Check if this cell is on the boundary of its territory
             const isBoundaryCell = (() => {
-              if (!cell.neighbors) return false
-              return cell.neighbors.some(neighborId => {
+              const cellData = cell as { neighbors?: number[], ownerTeamId: number }
+              if (!cellData.neighbors) return false
+              return cellData.neighbors.some((neighborId: number) => {
                 const neighbor = storeCells.find(c => (c as { id: number }).id === neighborId)
-                return neighbor && (neighbor as { ownerTeamId: number }).ownerTeamId !== (cell as { ownerTeamId: number }).ownerTeamId
+                return neighbor && (neighbor as { ownerTeamId: number }).ownerTeamId !== cellData.ownerTeamId
               })
             })()
             
@@ -322,15 +323,18 @@ export default function MapView() {
                   strokeOpacity={0.8}
                   strokeLinejoin="round"
                   strokeLinecap="round"
-                  initial={{ opacity: isNeutral ? 0.5 : 0.95, scale: 1, filter: "blur(0px)" }}
+                  initial={{ opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }}
                   animate={
                     isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam || (previewFromTeamId!=null && (owner as { id: number })?.id === previewFromTeamId)
-                      ? { opacity: 1, scale: 1.12, filter: "blur(0px)" }
+                      ? { opacity: 1, filter: "blur(0px)" }
                       : previewFromTeamId != null && !isNeutral
-                      ? { opacity: 0.4, scale: 1, filter: "blur(2px)" }
-                      : { opacity: isNeutral ? 0.5 : 0.95, scale: 1, filter: "blur(0px)" }
+                      ? { opacity: 0.4, filter: "blur(3px)" }
+                      : { opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }
                   }
-                  transition={{ type: "spring", stiffness: 260, damping: 24 }}
+                  transition={{ 
+                    opacity: { duration: 0.6, ease: "easeInOut" },
+                    filter: { duration: 0.8, ease: "easeInOut" }
+                  }}
                 >
                   <title>{`${(owner as { name?: string })?.name ?? (isNeutral ? 'Neutral' : 'Team')} • cell ${(cell as { id: number }).id}`}</title>
                 </motion.path>
@@ -512,6 +516,52 @@ export default function MapView() {
             return null
           }
           
+          // Helper function to find position within territory bounds
+          const findPositionWithinTerritory = (cells: any[], voronoiPolys: any[]) => {
+            // Try to find a position that's actually within the territory bounds
+            for (const cell of cells) {
+              const cellData = cell as { id: number, centroid: [number, number] }
+              const voronoiPoly = voronoiPolys[cellData.id]
+              
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                // Use the cell's centroid if it's within a reasonable polygon
+                const sumX = voronoiPoly.reduce((sum: number, point: [number, number]) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum: number, point: [number, number]) => sum + point[1], 0)
+                const centroid = [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
+                
+                // Check if this centroid is reasonably within the polygon
+                const bounds = {
+                  minX: Math.min(...voronoiPoly.map((p: [number, number]) => p[0])),
+                  maxX: Math.max(...voronoiPoly.map((p: [number, number]) => p[0])),
+                  minY: Math.min(...voronoiPoly.map((p: [number, number]) => p[1])),
+                  maxY: Math.max(...voronoiPoly.map((p: [number, number]) => p[1]))
+                }
+                
+                const polyCenter = [
+                  (bounds.minX + bounds.maxX) / 2,
+                  (bounds.minY + bounds.maxY) / 2
+                ]
+                
+                const distance = Math.sqrt(
+                  Math.pow(centroid[0] - polyCenter[0], 2) + 
+                  Math.pow(centroid[1] - polyCenter[1], 2)
+                )
+                
+                // If centroid is close to polygon center, use it
+                if (distance < 30) { // 30px threshold
+                  return centroid
+                }
+              }
+            }
+            
+            // Fallback: use the first cell's centroid
+            if (cells.length > 0) {
+              return (cells[0] as { centroid: [number, number] }).centroid
+            }
+            
+            return null
+          }
+          
           // Find the best position for logo within team territories
           const findBestLogoPosition = (cells: unknown[]): [number, number] => {
             if (cells.length === 1) {
@@ -589,13 +639,18 @@ export default function MapView() {
           }
           
           const logoPosition = findBestLogoPosition(teamCells)
-          const centerX = logoPosition[0]
+          let centerX = logoPosition[0]
           let centerY = logoPosition[1]
           
-          // Special adjustment for Başakşehir (logo appearing too low)
+          // Special adjustment for Başakşehir (logo appearing outside territory)
           if (teamName === 'Başakşehir') {
-            centerY = centerY - 50 // Move logo up by 50px (more aggressive)
-            console.log(`🔧 Başakşehir logo adjusted: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
+            // Find a position that's actually within the territory
+            let adjustedPosition = findPositionWithinTerritory(teamCells, voronoiPolys)
+            if (adjustedPosition) {
+              centerX = adjustedPosition[0]
+              centerY = adjustedPosition[1]
+              console.log(`🔧 Başakşehir logo adjusted to territory: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
+            }
           }
           
           // Detailed debug for logo positioning (only on first render)
