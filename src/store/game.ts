@@ -21,6 +21,7 @@ export interface Team {
   form?: number
   capitalCellId?: number
   capitalPenaltyUntilTurn?: number
+  abbreviation?: string
 }
 
 export interface HistoryItem {
@@ -123,7 +124,7 @@ export const DIRECTIONS: Direction[] = [
 
 export const useGameStore = create<GameState>((set, get) => ({
   selectedCountry: "Turkey" as CountryKey,
-  numTeams: 4,
+  numTeams: 5,
   mapColoring: "striped" as "solid" | "striped",
   seed: "demo",
   turn: 0,

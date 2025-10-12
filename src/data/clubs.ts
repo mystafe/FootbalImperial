@@ -21,7 +21,7 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 41.02,
       color: "#A3262A",
       colors: ["#F4C10F", "#A3262A"],
-      overall: 80,
+      overall: 85,
       abbreviation: "GS",
       founded: 1905
     },
@@ -35,6 +35,72 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       overall: 79,
       abbreviation: "FB",
       founded: 1907
+    },
+    {
+      name: "Beşiktaş",
+      city: "Istanbul",
+      lon: 29.01,
+      lat: 41.039,
+      color: "#000000",
+      colors: ["#000000", "#FFFFFF"],
+      overall: 78,
+      abbreviation: "BJK",
+      founded: 1903
+    },
+    {
+      name: "Trabzonspor",
+      city: "Trabzon",
+      lon: 39.7168,
+      lat: 41.0031,
+      color: "#7C162E",
+      colors: ["#7C162E", "#64B5F6"],
+      overall: 77,
+      abbreviation: "TS",
+      founded: 1967
+    },
+    {
+      name: "Samsunspor",
+      city: "Samsun",
+      lon: 36.3300,
+      lat: 41.2928,
+      color: "#FF0000",
+      colors: ["#FF0000", "#FFFFFF"],
+      overall: 75,
+      abbreviation: "SS",
+      founded: 1965
+    },
+    {
+      name: "Konyaspor",
+      city: "Konya",
+      lon: 32.4846,
+      lat: 37.8746,
+      color: "#0B6E4F",
+      colors: ["#0B6E4F", "#FFFFFF"],
+      overall: 74,
+      abbreviation: "KN",
+      founded: 1922
+    },
+    {
+      name: "Kayserispor",
+      city: "Kayseri",
+      lon: 35.4853,
+      lat: 38.7348,
+      color: "#D32F2F",
+      colors: ["#D32F2F", "#FBC02D"],
+      overall: 71,
+      abbreviation: "KY",
+      founded: 1966
+    },
+    {
+      name: "Antalyaspor",
+      city: "Antalya",
+      lon: 30.7133,
+      lat: 36.8969,
+      color: "#D50000",
+      colors: ["#D50000", "#FFFFFF"],
+      overall: 71,
+      abbreviation: "AT",
+      founded: 1966
     },
     {
       name: "Başakşehir",
@@ -81,17 +147,6 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       founded: 1926
     },
     {
-      name: "Kayserispor",
-      city: "Kayseri",
-      lon: 35.4853,
-      lat: 38.7348,
-      color: "#D32F2F",
-      colors: ["#D32F2F", "#FBC02D"],
-      overall: 71,
-      abbreviation: "KY",
-      founded: 1966
-    },
-    {
       name: "Gaziantep FK",
       city: "Gaziantep",
       lon: 37.3792,
@@ -136,44 +191,15 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       founded: 1923
     },
     {
-      name: "Beşiktaş",
-      city: "Istanbul",
-      lon: 29.01,
-      lat: 41.039,
-      color: "#000000",
-      colors: ["#000000", "#FFFFFF"],
-      overall: 78,
-      abbreviation: "BJK",
-      founded: 1903
-    },
-    {
-      name: "Trabzonspor",
-      city: "Trabzon",
-      lon: 39.7168,
-      lat: 41.0031,
-      color: "#7C162E",
-      colors: ["#7C162E", "#64B5F6"],
-      overall: 77,
-      abbreviation: "TS",
-      founded: 1967
-    },
-    {
       name: "Adana Demirspor",
       city: "Adana",
       lon: 35.3213,
       lat: 37.0007,
       color: "#0E4C92",
       colors: ["#0E4C92", "#87CEEB"],
-      overall: 75
-    },
-    {
-      name: "Konyaspor",
-      city: "Konya",
-      lon: 32.4846,
-      lat: 37.8746,
-      color: "#0B6E4F",
-      colors: ["#0B6E4F", "#FFFFFF"],
-      overall: 74
+      overall: 75,
+      abbreviation: "AD",
+      founded: 1940
     },
     {
       name: "Bursaspor",
@@ -182,16 +208,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 40.195,
       color: "#008D4F",
       colors: ["#008D4F", "#FFFFFF"],
-      overall: 72
-    },
-    {
-      name: "Antalyaspor",
-      city: "Antalya",
-      lon: 30.7133,
-      lat: 36.8969,
-      color: "#D50000",
-      colors: ["#D50000", "#FFFFFF"],
-      overall: 71
+      overall: 72,
+      abbreviation: "BS",
+      founded: 1963
     },
     {
       name: "Sivasspor",
@@ -200,7 +219,9 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
       lat: 39.7477,
       color: "#E51C23",
       colors: ["#E51C23", "#FFFFFF"],
-      overall: 70
+      overall: 70,
+      abbreviation: "SV",
+      founded: 1967
     }
   ],
   Italy: [

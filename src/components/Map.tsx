@@ -8,6 +8,7 @@ import { polygonCentroid } from "d3-polygon"
 import { createRng } from "../lib/random"
 import { COUNTRY_CLUBS } from "../data/clubs"
 import { motion } from "framer-motion"
+import { Spinner } from "./Spinner"
 import { BALANCE } from "../data/balance"
 
 const COUNTRY_NAME_TO_ID: Record<string, number | undefined> = {
@@ -21,7 +22,21 @@ const COUNTRY_NAME_TO_ID: Record<string, number | undefined> = {
   England: 826 // UK id; we will use the UK outline as England placeholder
 }
 
-export default function MapView() {
+interface MapViewProps {
+  showTeamSpinner?: boolean
+  teamSpinnerProps?: {
+    items: string[]
+    colors: string[]
+    winnerIndex?: number
+    fullNames?: string[]
+    onDone?: (index: number) => void
+  }
+}
+
+export default function MapView({
+  showTeamSpinner = false,
+  teamSpinnerProps
+}: MapViewProps) {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
   const mapColoring = useGameStore((s) => s.mapColoring)
@@ -70,14 +85,17 @@ export default function MapView() {
     return { countryFeature: f }
   }, [selected])
 
-  const path = useMemo(() => {
-    const projection = countryFeature
+  const projection = useMemo(() => {
+    return countryFeature
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ? geoMercator().fitSize([size.w, size.h], countryFeature as any)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       : geoMercator().fitSize([size.w, size.h], { type: 'Sphere' } as any)
-    return geoPath(projection)
   }, [countryFeature, size])
+
+  const path = useMemo(() => {
+    return geoPath(projection)
+  }, [projection])
 
   // Create Voronoi partition inside the selected country
   const { voronoiPolys, teamColors, points } = useMemo(() => {
@@ -192,8 +210,55 @@ export default function MapView() {
     }
     try {
       const clubs = (COUNTRY_CLUBS[selected] || [])
-      const candidateNames = clubs.map(c => (c as { name: string }).name)
-      const teamsLocal = (teamColors as unknown[]).map((colors, i) => ({ id: i, name: candidateNames[i] || `Team ${i + 1}`, color: Array.isArray(colors) ? (colors as string[])[0] : (colors as string), alive: true, overall: ((clubs[i] as { overall?: number })?.overall ?? 75) }))
+      // Use only the first N clubs based on priority order
+      const selectedClubs = clubs.slice(0, points.length)
+      
+      // Assign teams: match each club to its closest cell position
+      const clubAssignments: { clubIndex: number, cellIndex: number, distance: number }[] = []
+      
+      // For each club, find all possible cell assignments with distances
+      for (let j = 0; j < selectedClubs.length; j++) {
+        const club = selectedClubs[j] as { lon: number, lat: number }
+        const clubXY = projection([club.lon, club.lat]) as [number, number] | null
+        if (clubXY) {
+          for (let i = 0; i < points.length; i++) {
+            const cellCenter = points[i]
+            const distance = Math.sqrt(
+              Math.pow(cellCenter[0] - clubXY[0], 2) + 
+              Math.pow(cellCenter[1] - clubXY[1], 2)
+            )
+            clubAssignments.push({ clubIndex: j, cellIndex: i, distance })
+          }
+        }
+      }
+      
+      // Sort by distance and assign clubs to cells (greedy assignment)
+      clubAssignments.sort((a, b) => a.distance - b.distance)
+      const assignedCells = new Set<number>()
+      const assignedClubs = new Set<number>()
+      const cellToClub: { [cellIndex: number]: number } = {}
+      
+      for (const assignment of clubAssignments) {
+        if (!assignedCells.has(assignment.cellIndex) && !assignedClubs.has(assignment.clubIndex)) {
+          cellToClub[assignment.cellIndex] = assignment.clubIndex
+          assignedCells.add(assignment.cellIndex)
+          assignedClubs.add(assignment.clubIndex)
+        }
+      }
+      
+      // Create teams based on assignments
+      const teamsLocal = (teamColors as unknown[]).map((colors, i) => {
+        const clubIndex = cellToClub[i] ?? 0
+        const assignedClub = selectedClubs[clubIndex] as { name: string, overall?: number, abbreviation?: string }
+        return {
+          id: i, 
+          name: assignedClub.name, 
+          color: Array.isArray(colors) ? (colors as string[])[0] : (colors as string), 
+          alive: true, 
+          overall: assignedClub.overall ?? 75,
+          abbreviation: assignedClub.abbreviation
+        }
+      })
       const cellsLocal = voronoiPolys.map((poly, i) => {
         const c = polygonCentroid(poly as [number, number][]) as [number, number]
         return { id: i, ownerTeamId: i, centroid: c, polygon: poly, neighbors: [] as number[] }
@@ -210,13 +275,17 @@ export default function MapView() {
   }, [voronoiPolys, teamColors, points, setTeamsAndCells, selected, numTeams, mapColoring, size.w, size.h, seed, teams.length, storeCells.length])
 
   return (
-    <div className="w-full h-full">
+    <div className="relative w-full h-full">
       {/* Controls hidden during game */}
       <svg
         ref={svgRef}
         width={size.w}
         height={size.h}
-        className="w-full h-auto rounded border border-gray-200"
+        className={`w-full h-auto rounded border border-gray-200 transition-all duration-500 ${
+          showTeamSpinner 
+            ? 'blur-sm opacity-50' 
+            : 'blur-0 opacity-100'
+        }`}
       >
         <defs>
           <linearGradient id="ocean" x1="0" y1="0" x2="0" y2="1">
@@ -282,8 +351,8 @@ export default function MapView() {
             }
             const owner = teams.find((t) => (t as { id: number }).id === (cell as { ownerTeamId: number }).ownerTeamId)
             const last = history[history.length - 1]
-            const isCaptured = last && last.targetCellId === (cell as { id: number }).id
-            const isDefenderTeam = last && last.defenderTeamId != null && (cell as { ownerTeamId: number }).ownerTeamId === last.defenderTeamId
+            const isCaptured = last && last.targetCellId === (cell as { id: number }).id && last.turn === turn
+            const isDefenderTeam = last && last.defenderTeamId != null && (cell as { ownerTeamId: number }).ownerTeamId === last.defenderTeamId && last.turn === turn
             const isNeutral = (cell as { ownerTeamId: number }).ownerTeamId === -1 || (cell as { ownerTeamId: number }).ownerTeamId == null
             const isPreviewFrom = previewFrom === (cell as { id: number }).id
             const isPreviewTo = previewTo === (cell as { id: number }).id
@@ -292,15 +361,7 @@ export default function MapView() {
             const club = owner ? (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (owner as { name: string }).name) : undefined
             const dual = mapColoring === "striped" && club?.colors
             
-            // Check if this cell is on the boundary of its territory
-            const isBoundaryCell = (() => {
-              const cellData = cell as { neighbors?: number[], ownerTeamId: number }
-              if (!cellData.neighbors) return false
-              return cellData.neighbors.some((neighborId: number) => {
-                const neighbor = storeCells.find(c => (c as { id: number }).id === neighborId)
-                return neighbor && (neighbor as { ownerTeamId: number }).ownerTeamId !== cellData.ownerTeamId
-              })
-            })()
+            // Border logic removed - no internal borders between same team cells
             
             return (
               <g key={`cell-${i}-${ownerId}-${turn}`}>
@@ -314,12 +375,8 @@ export default function MapView() {
                       ? `url(#team-stripe-${(owner as { id: number })?.id})`
                       : ((owner as { color?: string })?.color || "#ddd")
                   }
-                  stroke={
-                    isBoundaryCell && !isNeutral 
-                      ? "#000" 
-                      : "none"
-                  }
-                  strokeWidth={isBoundaryCell && !isNeutral ? 2 : 0}
+                  stroke="none"
+                  strokeWidth={0}
                   strokeOpacity={0.8}
                   strokeLinejoin="round"
                   strokeLinecap="round"
@@ -342,66 +399,108 @@ export default function MapView() {
                 {/* Victory/Defeat animations on captured cell */}
                 {isCaptured && last && (
                   <>
-                    {last.attackerWon ? (
-                      // Victory animation - expanding wave
-                      <>
-                        <motion.path
-                          d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
-                          fill="none"
-                          stroke="#10b981"
-                          strokeWidth="4"
-                          initial={{ opacity: 0, strokeWidth: 0 }}
-                          animate={{ opacity: [0, 1, 0], strokeWidth: [0, 8, 0] }}
-                          transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
-                        />
-                        {/* Victory sparkles */}
+                  {last.attackerWon ? (
+                    // Victory animation - enhanced with multiple effects
+                    <>
+                      {/* Expanding victory wave */}
+                      <motion.path
+                        d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth="6"
+                        initial={{ opacity: 0, strokeWidth: 0 }}
+                        animate={{ opacity: [0, 1, 0.8, 0], strokeWidth: [0, 12, 8, 0] }}
+                        transition={{ duration: 1.2, ease: "easeOut", delay: 0.1 }}
+                      />
+                      {/* Victory sparkles with multiple stars */}
+                      {[0, 1, 2].map((i) => (
                         <motion.text
-                          x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length)}
-                          y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length)}
+                          key={i}
+                          x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length) + (i - 1) * 20}
+                          y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length) + (i - 1) * 15}
                           textAnchor="middle"
                           dominantBaseline="middle"
-                          fontSize="32"
+                          fontSize="24"
                           initial={{ opacity: 0, scale: 0, rotate: 0 }}
                           animate={{ 
                             opacity: [0, 1, 1, 0],
-                            scale: [0, 1.5, 1.5, 0.5],
-                            rotate: [0, 180, 360]
+                            scale: [0, 1.8, 1.2, 0.3],
+                            rotate: [0, 360]
                           }}
-                          transition={{ duration: 1.5, ease: "easeOut" }}
+                          transition={{ duration: 1.8, ease: "easeOut", delay: 0.2 + i * 0.1 }}
                         >
-                          ⭐
+                          {["⭐", "✨", "🌟"][i]}
                         </motion.text>
-                      </>
-                    ) : (
-                      // Defeat animation - collapsing
-                      <>
-                        <motion.path
-                          d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
-                          fill="none"
-                          stroke="#ef4444"
-                          strokeWidth="4"
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: [0, 1, 0] }}
-                          transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
-                        />
-                        {/* Defeat symbol */}
+                      ))}
+                      {/* Victory crown */}
+                      <motion.text
+                        x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length)}
+                        y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length) - 25}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fontSize="20"
+                        initial={{ opacity: 0, scale: 0, y: 0 }}
+                        animate={{ 
+                          opacity: [0, 1, 1, 0],
+                          scale: [0, 1.2, 1, 0.5],
+                          y: [0, -10, 0]
+                        }}
+                        transition={{ duration: 2, ease: "easeOut", delay: 0.5 }}
+                      >
+                        👑
+                      </motion.text>
+                    </>
+                  ) : (
+                    // Defeat animation - enhanced with dramatic effects
+                    <>
+                      {/* Defeat shockwave */}
+                      <motion.path
+                        d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
+                        fill="none"
+                        stroke="#ef4444"
+                        strokeWidth="6"
+                        initial={{ opacity: 0, strokeWidth: 0 }}
+                        animate={{ opacity: [0, 1, 0.6, 0], strokeWidth: [0, 10, 6, 0] }}
+                        transition={{ duration: 1.2, ease: "easeOut", delay: 0.1 }}
+                      />
+                      {/* Defeat symbols with multiple effects */}
+                      {[0, 1, 2].map((i) => (
                         <motion.text
-                          x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length)}
-                          y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length)}
+                          key={i}
+                          x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length) + (i - 1) * 18}
+                          y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length) + (i - 1) * 12}
                           textAnchor="middle"
                           dominantBaseline="middle"
-                          fontSize="28"
-                          initial={{ opacity: 0, scale: 2 }}
+                          fontSize="20"
+                          initial={{ opacity: 0, scale: 3 }}
                           animate={{ 
                             opacity: [0, 1, 1, 0],
-                            scale: [2, 0.8, 0.8, 0]
+                            scale: [3, 1, 0.8, 0]
                           }}
-                          transition={{ duration: 1.5, ease: "easeOut" }}
+                          transition={{ duration: 1.6, ease: "easeOut", delay: 0.2 + i * 0.15 }}
                         >
-                          💥
+                          {["💥", "💢", "❌"][i]}
                         </motion.text>
-                      </>
-                    )}
+                      ))}
+                      {/* Defeat skull */}
+                      <motion.text
+                        x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length)}
+                        y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length) - 20}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fontSize="18"
+                        initial={{ opacity: 0, scale: 2, rotate: 0 }}
+                        animate={{ 
+                          opacity: [0, 1, 1, 0],
+                          scale: [2, 1, 0.5, 0],
+                          rotate: [0, 180]
+                        }}
+                        transition={{ duration: 2, ease: "easeOut", delay: 0.6 }}
+                      >
+                        💀
+                      </motion.text>
+                    </>
+                  )}
                   </>
                 )}
                 {/* Team label moved to overlay to ensure topmost layering */}
@@ -440,26 +539,43 @@ export default function MapView() {
             
             const [sx, sy] = attackerCenter
             
-            // Get the selected direction from history
-            const selectedDirection = last?.direction || 'S'
-            console.log(`🎯 Attack arrow direction: ${selectedDirection}`)
+            console.log(`🎯 Direction calc input: rotatingArrowAngle=${rotatingArrowAngle}, last?.direction=${last?.direction}`)
+            
+            // Get the selected direction from rotating arrow angle, not history
+            const selectedDirection = rotatingArrowAngle != null ? 
+              (() => {
+                // Convert angle back to direction
+                const normalizedAngle = ((rotatingArrowAngle % 360) + 360) % 360
+                if (normalizedAngle >= 337.5 || normalizedAngle < 22.5) return 'E'
+                if (normalizedAngle >= 22.5 && normalizedAngle < 67.5) return 'NE'
+                if (normalizedAngle >= 67.5 && normalizedAngle < 112.5) return 'N'
+                if (normalizedAngle >= 112.5 && normalizedAngle < 157.5) return 'NW'
+                if (normalizedAngle >= 157.5 && normalizedAngle < 202.5) return 'W'
+                if (normalizedAngle >= 202.5 && normalizedAngle < 247.5) return 'SW'
+                if (normalizedAngle >= 247.5 && normalizedAngle < 292.5) return 'S'
+                if (normalizedAngle >= 292.5 && normalizedAngle < 337.5) return 'SE'
+                return 'S'
+              })() : (last?.direction || 'S')
+            console.log(`🎯 Attack arrow direction [v2]: ${selectedDirection} (from angle: ${rotatingArrowAngle}, fallback: ${last?.direction})`)
             
             // Calculate direction vector based on selected direction
+            // SVG coordinate system: E=0°, N=270°, W=180°, S=90°
             const dirAngle: Record<string, number> = {
-              E: 0,
-              NE: 45,
-              N: 90,
-              NW: 135,
-              W: 180,
-              SW: -135,
-              S: -90,
-              SE: -45
+              E: 0,    // Right
+              NE: 315, // Right-Up (315°)
+              N: 270,  // Up
+              NW: 225, // Left-Up (225°)
+              W: 180,  // Left
+              SW: 135, // Left-Down (135°)
+              S: 90,   // Down
+              SE: 45   // Right-Down (45°)
             }
             
-            const deg = dirAngle[selectedDirection] || -90
+            const deg = dirAngle[selectedDirection] || 90
+            // Convert to SVG coordinate system: Y-axis points down
             const ang = (deg * Math.PI) / 180
-            const ndx = Math.cos(-ang)
-            const ndy = Math.sin(-ang)
+            const ndx = Math.cos(ang)
+            const ndy = Math.sin(ang) // SVG Y-axis points down, so this is correct
             
             // Calculate arrow end point based on selected direction
             const arrowLength = 80 // Fixed arrow length
@@ -467,6 +583,7 @@ export default function MapView() {
             const ey = sy + ndy * arrowLength
             
             console.log(`🎯 Arrow: Start(${sx.toFixed(1)}, ${sy.toFixed(1)}) → End(${ex.toFixed(1)}, ${ey.toFixed(1)})`)
+            console.log(`🎯 Arrow calc: direction=${selectedDirection}, deg=${deg}, ndx=${ndx.toFixed(3)}, ndy=${ndy.toFixed(3)}`)
             
             const mx = (sx + ex) / 2
             const my = (sy + ey) / 2 - 24
@@ -516,51 +633,6 @@ export default function MapView() {
             return null
           }
           
-          // Helper function to find position within territory bounds
-          const findPositionWithinTerritory = (cells: any[], voronoiPolys: any[]) => {
-            // Try to find a position that's actually within the territory bounds
-            for (const cell of cells) {
-              const cellData = cell as { id: number, centroid: [number, number] }
-              const voronoiPoly = voronoiPolys[cellData.id]
-              
-              if (voronoiPoly && voronoiPoly.length > 0) {
-                // Use the cell's centroid if it's within a reasonable polygon
-                const sumX = voronoiPoly.reduce((sum: number, point: [number, number]) => sum + point[0], 0)
-                const sumY = voronoiPoly.reduce((sum: number, point: [number, number]) => sum + point[1], 0)
-                const centroid = [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
-                
-                // Check if this centroid is reasonably within the polygon
-                const bounds = {
-                  minX: Math.min(...voronoiPoly.map((p: [number, number]) => p[0])),
-                  maxX: Math.max(...voronoiPoly.map((p: [number, number]) => p[0])),
-                  minY: Math.min(...voronoiPoly.map((p: [number, number]) => p[1])),
-                  maxY: Math.max(...voronoiPoly.map((p: [number, number]) => p[1]))
-                }
-                
-                const polyCenter = [
-                  (bounds.minX + bounds.maxX) / 2,
-                  (bounds.minY + bounds.maxY) / 2
-                ]
-                
-                const distance = Math.sqrt(
-                  Math.pow(centroid[0] - polyCenter[0], 2) + 
-                  Math.pow(centroid[1] - polyCenter[1], 2)
-                )
-                
-                // If centroid is close to polygon center, use it
-                if (distance < 30) { // 30px threshold
-                  return centroid
-                }
-              }
-            }
-            
-            // Fallback: use the first cell's centroid
-            if (cells.length > 0) {
-              return (cells[0] as { centroid: [number, number] }).centroid
-            }
-            
-            return null
-          }
           
           // Find the best position for logo within team territories
           const findBestLogoPosition = (cells: unknown[]): [number, number] => {
@@ -644,47 +716,35 @@ export default function MapView() {
           
           // Special adjustment for Başakşehir (logo appearing outside territory)
           if (teamName === 'Başakşehir') {
-            // Find a position that's actually within the territory
-            let adjustedPosition = findPositionWithinTerritory(teamCells, voronoiPolys)
-            if (adjustedPosition) {
-              centerX = adjustedPosition[0]
-              centerY = adjustedPosition[1]
-              console.log(`🔧 Başakşehir logo adjusted to territory: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
+            // Find the most central cell by calculating distances from geometric center
+            const geometricCenter = {
+              x: teamCells.reduce((sum: number, cell: unknown) => sum + (cell as { centroid: [number, number] }).centroid[0], 0) / teamCells.length,
+              y: teamCells.reduce((sum: number, cell: unknown) => sum + (cell as { centroid: [number, number] }).centroid[1], 0) / teamCells.length
             }
+            
+            let bestCell = teamCells[0] as { id: number, centroid: [number, number] }
+            let minDistance = Infinity
+            
+            for (const cell of teamCells) {
+              const cellData = cell as { id: number, centroid: [number, number] }
+              const distance = Math.sqrt(
+                Math.pow(cellData.centroid[0] - geometricCenter.x, 2) + 
+                Math.pow(cellData.centroid[1] - geometricCenter.y, 2)
+              )
+              if (distance < minDistance) {
+                minDistance = distance
+                bestCell = cellData
+              }
+            }
+            
+            centerX = bestCell.centroid[0]
+            centerY = bestCell.centroid[1]
           }
           
-          // Detailed debug for logo positioning (only on first render)
-          if (turn === 0) {
-            console.log(`\n=== ${teamName} LOGO ANALYSIS ===`)
-            console.log(`Team ID: ${teamId}`)
-            console.log(`Team cells: ${teamCells.length}`)
-            
-            // Show all team cells with their centroids and voronoi poly info
-            teamCells.forEach((cell, idx) => {
-              const cellData = cell as { id: number, centroid: [number, number] }
-              const voronoiPoly = voronoiPolys[cellData.id]
-              if (voronoiPoly && voronoiPoly.length > 0) {
-                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
-                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
-                const voronoiCentroid = [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
-                console.log(`  Cell ${idx}: ID=${cellData.id}, CellCentroid=(${cellData.centroid[0].toFixed(1)}, ${cellData.centroid[1].toFixed(1)}), VoronoiCentroid=(${voronoiCentroid[0].toFixed(1)}, ${voronoiCentroid[1].toFixed(1)})`)
-              } else {
-                console.log(`  Cell ${idx}: ID=${cellData.id}, Centroid=(${cellData.centroid[0].toFixed(1)}, ${cellData.centroid[1].toFixed(1)}), VoronoiPoly=NOT_FOUND`)
-              }
-            })
-            
-            console.log(`Final logo position: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
-            console.log(`=== END ${teamName} ANALYSIS ===\n`)
-          }
           
           // CSS logo generation - no need for SVG paths
           const centroid: [number, number] = [centerX, centerY]
           
-          // Debug logo position for Başakşehir
-          if (teamName === 'Başakşehir') {
-            console.log(`🎯 Başakşehir logo position: (${centerX.toFixed(1)}, ${centerY.toFixed(1)})`)
-            console.log(`🎯 Başakşehir logo transform: translate(${(centerX-16).toFixed(1)}, ${(centerY-16).toFixed(1)})`)
-          }
           
           return (
             <g key={`logo-${teamId}-${turn}`} transform={`translate(${centroid[0]-32}, ${centroid[1]-32})`}>
@@ -781,6 +841,13 @@ export default function MapView() {
           const endX = centerX + Math.cos(angle) * arrowLength
           const endY = centerY + Math.sin(angle) * arrowLength
           
+          console.log('🎯 Arrow Debug:', {
+            rotatingArrowAngle,
+            centerPos: [centerX, centerY],
+            endPos: [endX, endY],
+            angle: angle * 180 / Math.PI
+          })
+          
           return (
             <g key={`rotating-arrow-${rotatingArrowTeamId}`}>
               {/* Arrow glow */}
@@ -850,19 +917,37 @@ export default function MapView() {
           const startX = totalX / teamCells.length
           const startY = totalY / teamCells.length
           
-          // Find the target cell and go directly to it
-          const targetCell = storeCells.find((c) => (c as { id: number }).id === beamTargetCell) as { centroid: [number, number], id: number } | undefined
-          if (!targetCell) return null
+          // Use arrow angle to determine beam direction (beam should follow arrow direction)
+          let endX = startX
+          let endY = startY
           
-          // Calculate target position (use voronoi poly centroid if available)
-          const targetPoly = voronoiPolys[targetCell.id]
-          let endX = targetCell.centroid[0]
-          let endY = targetCell.centroid[1]
-          if (targetPoly && targetPoly.length > 0) {
-            const sumX = targetPoly.reduce((sum, point) => sum + point[0], 0)
-            const sumY = targetPoly.reduce((sum, point) => sum + point[1], 0)
-            endX = sumX / targetPoly.length
-            endY = sumY / targetPoly.length
+          // Always use arrow direction for beam, not target cell
+          if (rotatingArrowAngle !== null && rotatingArrowAngle !== undefined) {
+            const angleRad = ((rotatingArrowAngle - 90) * Math.PI) / 180
+            const beamLength = 300 // Increased beam length for better visibility
+            endX = startX + Math.cos(angleRad) * beamLength
+            endY = startY + Math.sin(angleRad) * beamLength
+            console.log('🎯 Beam Debug [Arrow Direction]:', {
+              rotatingArrowAngle,
+              angleRad,
+              startPos: [startX, startY],
+              endPos: [endX, endY],
+              beamLength
+            })
+          } else {
+            // Fallback to target cell if no arrow angle
+            const targetCell = storeCells.find((c) => (c as { id: number }).id === beamTargetCell) as { centroid: [number, number], id: number } | undefined
+            if (targetCell) {
+              const targetPoly = voronoiPolys[targetCell.id]
+              endX = targetCell.centroid[0]
+              endY = targetCell.centroid[1]
+              if (targetPoly && targetPoly.length > 0) {
+                const sumX = targetPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = targetPoly.reduce((sum, point) => sum + point[1], 0)
+                endX = sumX / targetPoly.length
+                endY = sumY / targetPoly.length
+              }
+            }
           }
           
           
@@ -884,22 +969,56 @@ export default function MapView() {
                 </filter>
               </defs>
               
+              {/* Source energy effect */}
+              <motion.circle
+                cx={startX}
+                cy={startY}
+                r="0"
+                fill="url(#beamGradient)"
+                filter="url(#beamGlow)"
+                initial={{ r: 0, opacity: 0 }}
+                animate={{ 
+                  r: [0, 8, 12, 8, 0],
+                  opacity: [0, 0.8, 1, 0.6, 0]
+                }}
+                transition={{ 
+                  duration: 3.0, 
+                  ease: "easeOut",
+                  r: { duration: 3.0, times: [0, 0.2, 0.4, 0.7, 1] },
+                  opacity: { duration: 3.0, times: [0, 0.2, 0.4, 0.7, 1] }
+                }}
+              />
+              
               {/* Animated beam */}
               <motion.line
                 x1={startX}
                 y1={startY}
-                x2={endX}
-                y2={endY}
+                x2={startX}
+                y2={startY}
                 stroke="url(#beamGradient)"
                 strokeWidth="12"
                 strokeLinecap="round"
                 filter="url(#beamGlow)"
-                initial={{ opacity: 0, strokeWidth: 0 }}
-                animate={{ 
-                  opacity: [0, 1, 0.8, 1, 0],
-                  strokeWidth: [0, 18, 12, 18, 0]
+                initial={{ 
+                  x2: startX, 
+                  y2: startY, 
+                  opacity: 0, 
+                  strokeWidth: 0 
                 }}
-                transition={{ duration: 0.8, ease: "easeInOut" }}
+                animate={{ 
+                  x2: endX,
+                  y2: endY,
+                  opacity: [0, 0.3, 0.8, 1, 0.8, 0],
+                  strokeWidth: [0, 2, 8, 16, 12, 0]
+                }}
+                transition={{ 
+                  duration: 3.0, 
+                  ease: "easeOut",
+                  x2: { duration: 3.0, ease: "easeOut" },
+                  y2: { duration: 3.0, ease: "easeOut" },
+                  opacity: { duration: 3.0, times: [0, 0.2, 0.4, 0.7, 0.9, 1] },
+                  strokeWidth: { duration: 3.0, times: [0, 0.1, 0.3, 0.6, 0.8, 1] }
+                }}
               />
               
               {/* Impact effect at target cell */}
@@ -921,7 +1040,7 @@ export default function MapView() {
                       filter="url(#beamGlow)"
                       initial={{ r: 0, opacity: 1 }}
                       animate={{ r: [0, 50], opacity: [1, 0] }}
-                      transition={{ duration: 0.6, ease: "easeOut" }}
+                      transition={{ duration: 1.8, ease: "easeOut" }}
                     />
                     <motion.circle
                       cx={targetX}
@@ -932,7 +1051,7 @@ export default function MapView() {
                       filter="url(#beamGlow)"
                       initial={{ r: 0, opacity: 0 }}
                       animate={{ r: [0, 30, 0], opacity: [0, 0.9, 0] }}
-                      transition={{ duration: 0.8, ease: "easeOut" }}
+                      transition={{ duration: 2.2, ease: "easeOut" }}
                     />
                   </>
                 )
@@ -941,6 +1060,23 @@ export default function MapView() {
           )
         })()}
       </svg>
+      
+      {/* Spinner Overlay */}
+      {showTeamSpinner && teamSpinnerProps && (
+        <div className="absolute inset-0 flex items-center justify-center z-40 bg-black/40 backdrop-blur-sm rounded-3xl p-24 shadow-2xl border border-white/30">
+          <div className="scale-[3.5]">
+            <Spinner
+              key={`overlay-team-${teamSpinnerProps.winnerIndex}-${turn}-${Date.now()}`}
+              items={teamSpinnerProps.items}
+              colors={teamSpinnerProps.colors}
+              winnerIndex={teamSpinnerProps.winnerIndex}
+              fullNames={teamSpinnerProps.fullNames}
+              onDone={teamSpinnerProps.onDone}
+            />
+          </div>
+        </div>
+      )}
+      
     </div>
   )
 }

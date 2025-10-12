@@ -30,38 +30,94 @@ export function Spinner({
   useEffect(() => {
     let cancelled = false
     const spin = async () => {
-      if (hasSpun) return
+      // Only spin if we have a valid winnerIndex and haven't spun yet
+      if (typeof winnerIndex !== "number" || winnerIndex < 0 || winnerIndex >= items.length || hasSpun) {
+        return
+      }
+      
       setStopped(false)
       const spins = 5 + Math.random() * 2
-      const winner =
-        typeof winnerIndex === "number"
-          ? Math.max(0, Math.min(items.length - 1, winnerIndex))
-          : Math.floor(Math.random() * items.length)
+      const finalWinnerIndex = winnerIndex
       const anglePer = 360 / Math.max(1, items.length)
-      const finalAngle = spins * 360 + winner * anglePer
+      // Spinner rotates clockwise, pointer is at top (90 degrees)
+      // Segment 0 starts at 0° and ends at anglePer (72°)
+      // Segment center positions: 0°=36°, 1°=108°, 2°=180°, 3°=252°, 4°=324°
+      // SVG coordinate system: 0° is right (3 o'clock), 90° is down (6 o'clock)
+      // Pointer is at 90° (down), but we want segment center to be at pointer
+      // So we need to rotate segment center to 90° position
+      const segmentCenter = finalWinnerIndex * anglePer + anglePer / 2
+      // Convert to SVG coordinates and rotate to pointer position
+      const finalAngle = spins * 360 + (90 - segmentCenter)
+      // Calculate which segment will be at pointer after rotation
+      const normalizedAngle = ((finalAngle % 360) + 360) % 360
+      // Pointer is at 90° (down), so we need to find which segment center is closest to 90°
+      // After rotation, segment centers are at: (originalCenter + normalizedAngle) % 360
+      // We want to find which segment center is closest to 90°
+      let minDistance = Infinity
+      let closestSegment = 0
+      for (let i = 0; i < items.length; i++) {
+        const segmentCenter = i * anglePer + anglePer / 2
+        const rotatedCenter = (segmentCenter + normalizedAngle) % 360
+        const distance = Math.abs(rotatedCenter - 90)
+        if (distance < minDistance) {
+          minDistance = distance
+          closestSegment = i
+        }
+      }
+      const pointerSegment = closestSegment
+      
+      console.log('🎯 Spinner Debug [v6]:', {
+        winnerIndex,
+        finalWinnerIndex,
+        anglePer,
+        segmentCenter,
+        finalAngle,
+        normalizedAngle,
+        pointerSegment,
+        minDistance,
+        expectedAtPointer: items[finalWinnerIndex],
+        actualAtPointer: items[pointerSegment],
+        segmentDistances: items.map((item, i) => {
+          const segCenter = i * anglePer + anglePer / 2
+          const rotatedCenter = (segCenter + normalizedAngle) % 360
+          const distance = Math.abs(rotatedCenter - 90)
+          return `${i}:${item}=${distance.toFixed(1)}°`
+        }),
+        items: items.map((item, i) => `${i}:${item}`)
+      })
+      
       await controls.start({
         rotate: finalAngle,
         transition: { duration: durationMs / 1000, ease: "easeInOut" }
       })
+      
       if (cancelled) return
-      // Arrow points up (0 degrees), so we need to find which slice is at the top
-      // After rotation, the wheel has rotated by finalAngle degrees
-      // The slice at top is the one that started at -finalAngle position
-      const norm = ((finalAngle % 360) + 360) % 360
-      // Which slice is at 90 degrees (top) after rotation?
-      // We need to reverse the logic: if wheel rotated X degrees clockwise,
-      // the slice that's now at top originally started at (360 - X) degrees
-      const sliceAtTop = Math.floor(((360 - norm + 90) % 360) / anglePer) % items.length
-      setDisplayIndex(sliceAtTop)
+      
+      console.log('🎯 Spinner Final [v6]:', {
+        finalAngle,
+        finalWinnerIndex,
+        segmentCenter,
+        normalizedAngle,
+        pointerSegment,
+        minDistance,
+        expectedTeam: items[finalWinnerIndex],
+        actualAtPointer: items[pointerSegment]
+      })
+      
+      // Always use the predefined winnerIndex
+      setDisplayIndex(finalWinnerIndex)
       setStopped(true)
-      setHasSpun(true)
-      setTimeout(() => onDone?.(sliceAtTop), 600)
+      setHasSpun(true) // Mark as spun to prevent re-spinning
+      setTimeout(() => {
+        console.log('🎯 Calling onDone with:', finalWinnerIndex)
+        onDone?.(finalWinnerIndex)
+      }, 600)
     }
     spin()
     return () => {
       cancelled = true
     }
-  }, [items, controls, durationMs, winnerIndex, hasSpun, onDone])
+  }, [winnerIndex, controls, durationMs, hasSpun]) // Include hasSpun to prevent re-spinning
 
   const angle = 360 / Math.max(1, items.length)
   const colorFor = (i: number, base: string) => {
@@ -144,7 +200,7 @@ export function Spinner({
           animate={controls}
         >
           {items.map((label, i) => {
-            const start = i * angle - angle / 2
+            const start = i * angle
             const end = start + angle
             const r = 50
             const toRad = (deg: number) => (deg - 90) * (Math.PI / 180)
