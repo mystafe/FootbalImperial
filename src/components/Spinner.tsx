@@ -44,13 +44,18 @@ export function Spinner({
         transition: { duration: durationMs / 1000, ease: "easeInOut" }
       })
       if (cancelled) return
-      // Determine which slice the arrow tip points to
+      // Arrow points up (0 degrees), so we need to find which slice is at the top
+      // After rotation, the wheel has rotated by finalAngle degrees
+      // The slice at top is the one that started at -finalAngle position
       const norm = ((finalAngle % 360) + 360) % 360
-      const idx = Math.round(norm / anglePer) % items.length
-      setDisplayIndex(idx)
+      // Which slice is at 90 degrees (top) after rotation?
+      // We need to reverse the logic: if wheel rotated X degrees clockwise,
+      // the slice that's now at top originally started at (360 - X) degrees
+      const sliceAtTop = Math.floor(((360 - norm + 90) % 360) / anglePer) % items.length
+      setDisplayIndex(sliceAtTop)
       setStopped(true)
       setHasSpun(true)
-      setTimeout(() => onDone?.(idx), 600)
+      setTimeout(() => onDone?.(sliceAtTop), 600)
     }
     spin()
     return () => {
@@ -79,91 +84,164 @@ export function Spinner({
 
   return (
     <div
-      className="relative mx-auto select-none"
+      className="relative mx-auto select-none w-full flex items-center justify-center"
       style={{
-        width: sizePx + 20, // Add padding for scale effect
-        height: sizePx + 20,
+        minHeight: sizePx * 1.2,
         overflow: "visible" // Allow scale effect to show
       }}
     >
+      {/* Background card */}
+      <div className="absolute inset-0 bg-slate-800/40 border border-slate-700/50 rounded-2xl backdrop-blur-sm"></div>
+      {/* Glow effect */}
+      <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/20 via-blue-500/20 to-purple-500/20 rounded-full blur-2xl animate-pulse" style={{margin: '20px'}}></div>
+      
       <svg
-        className="h-full w-full"
-        viewBox="0 0 100 100"
+        className="drop-shadow-2xl relative z-10"
+        viewBox="-12 -12 124 124"
+        preserveAspectRatio="xMidYMid meet"
         style={{
           width: sizePx,
           height: sizePx,
-          margin: "10px" // Center the SVG within the larger container
+          filter: "drop-shadow(0 10px 25px rgba(0,0,0,0.3))"
         }}
       >
-        {items.map((label, i) => {
-          const start = i * angle - angle / 2
-          const end = start + angle
-          const r = 50
-          const toRad = (deg: number) => (deg - 90) * (Math.PI / 180)
-          const x1 = 50 + r * Math.cos(toRad(start))
-          const y1 = 50 + r * Math.sin(toRad(start))
-          const x2 = 50 + r * Math.cos(toRad(end))
-          const y2 = 50 + r * Math.sin(toRad(end))
-          const largeArc = end - start > 180 ? 1 : 0
-          const path = `M50,50 L${x1},${y1} A${r},${r} 0 ${largeArc} 1 ${x2},${y2} z`
-          const isWinner = stopped ? displayIndex === i : normalizedWinner === i
-          return (
-            <motion.g
-              key={i}
-              initial={false}
-              animate={isWinner && stopped ? { scale: 1.06 } : { scale: 1 }}
-              transition={{ type: "spring", stiffness: 220, damping: 20 }}
-              style={{ transformBox: "view-box", transformOrigin: "50px 50px" }}
-            >
-              <title>{fullNames && fullNames[i] ? fullNames[i] : label}</title>
-              <path
-                d={path}
-                fill={colorFor(i, items[i] || "#ddd")}
-                stroke="#111827"
-                strokeWidth={0.35}
-              />
-              {isWinner && stopped && (
-                <path d={path} fill="none" stroke="#ef4444" strokeWidth={1.1} />
-              )}
-              <text
-                x="50"
-                y="50"
-                dominantBaseline="middle"
-                textAnchor="middle"
-                transform={`rotate(${
-                  start + angle / 2
-                } 50 50) translate(0 -30)`}
-                fontSize="4.2"
-                fontWeight="800"
-                fill="#0b1220"
-                stroke="#ffffff"
-                strokeWidth={isWinner && stopped ? 0.35 : 0.25}
-                paintOrder="stroke"
-              >
-                {label.length > 3 ? label.slice(0, 3) : label}
-              </text>
-            </motion.g>
-          )
-        })}
+        {/* Defs for gradients and filters */}
+        <defs>
+          <radialGradient id="centerGradient">
+            <stop offset="0%" stopColor="#fbbf24" />
+            <stop offset="50%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#d97706" />
+          </radialGradient>
+          <radialGradient id="innerCircleGradient">
+            <stop offset="0%" stopColor="#1f2937" />
+            <stop offset="100%" stopColor="#111827" />
+          </radialGradient>
+          <linearGradient id="pointerGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#fbbf24" />
+            <stop offset="50%" stopColor="#f59e0b" />
+            <stop offset="100%" stopColor="#ef4444" />
+          </linearGradient>
+          <filter id="pointerGlow">
+            <feGaussianBlur stdDeviation="1.2" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+          <filter id="centerGlow">
+            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
+            <feMerge>
+              <feMergeNode in="coloredBlur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+
+        {/* Rotating wheel */}
         <motion.g
+          style={{ originX: "50px", originY: "50px" }}
+          initial={{ rotate: 0 }}
           animate={controls}
-          style={{ transformBox: "view-box", transformOrigin: "50px 50px" }}
         >
-          <polygon
-            points="47,50 53,50 50,24"
-            fill="#ef4444"
-            stroke="#111827"
-            strokeWidth={0.5}
-          />
+          {items.map((label, i) => {
+            const start = i * angle - angle / 2
+            const end = start + angle
+            const r = 50
+            const toRad = (deg: number) => (deg - 90) * (Math.PI / 180)
+            const x1 = 50 + r * Math.cos(toRad(start))
+            const y1 = 50 + r * Math.sin(toRad(start))
+            const x2 = 50 + r * Math.cos(toRad(end))
+            const y2 = 50 + r * Math.sin(toRad(end))
+            const largeArc = end - start > 180 ? 1 : 0
+            const path = `M50,50 L${x1},${y1} A${r},${r} 0 ${largeArc} 1 ${x2},${y2} z`
+            const isWinner = stopped ? displayIndex === i : normalizedWinner === i
+            return (
+              <g key={i}>
+                <title>{fullNames && fullNames[i] ? fullNames[i] : label}</title>
+                <path
+                  d={path}
+                  fill={colorFor(i, items[i] || "#ddd")}
+                  stroke="#111827"
+                  strokeWidth={0.5}
+                  style={{
+                    filter: isWinner && stopped ? "brightness(1.3)" : "none"
+                  }}
+                />
+                {isWinner && stopped && (
+                  <>
+                    <path d={path} fill="none" stroke="#fbbf24" strokeWidth={2} opacity={0.8} />
+                    <path d={path} fill="none" stroke="#ef4444" strokeWidth={1.5} />
+                  </>
+                )}
+                <text
+                  x="50"
+                  y="50"
+                  dominantBaseline="middle"
+                  textAnchor="middle"
+                  transform={`rotate(${
+                    start + angle / 2
+                  } 50 50) translate(0 -30)`}
+                  fontSize="5"
+                  fontWeight="900"
+                  fill="#111827"
+                  stroke="#ffffff"
+                  strokeWidth={isWinner && stopped ? 0.5 : 0.35}
+                  paintOrder="stroke"
+                >
+                  {label.length > 3 ? label.slice(0, 3) : label}
+                </text>
+              </g>
+            )
+          })}
         </motion.g>
-        <circle
-          cx={50}
-          cy={50}
-          r={6}
-          fill="#111827"
-          stroke="#ffffff"
-          strokeWidth={1}
-        />
+        
+        {/* Static pointer (not rotating) */}
+        <g>
+          {/* Pointer shadow */}
+          <polygon
+            points="46,50 54,50 50,18"
+            fill="#000000"
+            opacity={0.3}
+            transform="translate(1, 1)"
+          />
+          {/* Main pointer */}
+          <polygon
+            points="46,50 54,50 50,18"
+            fill="url(#pointerGradient)"
+            stroke="#ffffff"
+            strokeWidth={1.2}
+            filter="url(#pointerGlow)"
+          />
+        </g>
+        
+        {/* Enhanced center button */}
+        <g filter="url(#centerGlow)">
+          {/* Outer ring */}
+          <circle
+            cx={50}
+            cy={50}
+            r={10}
+            fill="url(#centerGradient)"
+            stroke="#ffffff"
+            strokeWidth={2}
+          />
+          {/* Inner circle */}
+          <circle
+            cx={50}
+            cy={50}
+            r={6}
+            fill="url(#innerCircleGradient)"
+            stroke="#fbbf24"
+            strokeWidth={1.2}
+          />
+          {/* Center dot */}
+          <circle
+            cx={50}
+            cy={50}
+            r={2.5}
+            fill="#fbbf24"
+          />
+        </g>
       </svg>
     </div>
   )

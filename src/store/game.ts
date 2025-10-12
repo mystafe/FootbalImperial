@@ -58,6 +58,10 @@ interface GameState {
   suppressLastOverlay?: boolean
   frozenSnapshotIndex?: number
   previewFromTeamId?: number
+  rotatingArrowTeamId?: number
+  rotatingArrowAngle?: number
+  beamActive?: boolean
+  beamTargetCell?: number
   setSeed: (seed: string) => void
   setCountry: (c: CountryKey) => void
   setNumTeams: (n: number) => void
@@ -68,6 +72,8 @@ interface GameState {
   setSuppressLastOverlay?: (v: boolean) => void
   setFrozenSnapshotIndex?: (idx?: number) => void
   setPreviewFromTeamId?: (teamId?: number) => void
+  setRotatingArrow?: (teamId?: number, angle?: number) => void
+  setBeam?: (active: boolean, targetCell?: number) => void
   resolveTarget: (
     attackerTeamId: number,
     direction: Direction
@@ -210,6 +216,10 @@ export const useGameStore = create<GameState>((set, get) => ({
   setSuppressLastOverlay: (v: boolean) => set({ suppressLastOverlay: v }),
   setFrozenSnapshotIndex: (idx?: number) => set({ frozenSnapshotIndex: idx }),
   setPreviewFromTeamId: (teamId?: number) => set({ previewFromTeamId: teamId }),
+  setRotatingArrow: (teamId?: number, angle?: number) => 
+    set({ rotatingArrowTeamId: teamId, rotatingArrowAngle: angle }),
+  setBeam: (active: boolean, targetCell?: number) =>
+    set({ beamActive: active, beamTargetCell: targetCell }),
   resolveTarget: (attackerTeamId: number, direction: Direction) => {
     const state = get()
     const dirAngle: Record<Direction, number> = {

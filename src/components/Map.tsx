@@ -35,6 +35,10 @@ export default function MapView() {
   const previewFrom = useGameStore((s) => (s as { previewFromCellId?: number }).previewFromCellId)
   const previewTo = useGameStore((s) => (s as { previewToCellId?: number }).previewToCellId)
   const previewFromTeamId = useGameStore((s) => (s as { previewFromTeamId?: number }).previewFromTeamId)
+  const rotatingArrowTeamId = useGameStore((s) => (s as { rotatingArrowTeamId?: number }).rotatingArrowTeamId)
+  const rotatingArrowAngle = useGameStore((s) => (s as { rotatingArrowAngle?: number }).rotatingArrowAngle)
+  const beamActive = useGameStore((s) => (s as { beamActive?: boolean }).beamActive)
+  const beamTargetCell = useGameStore((s) => (s as { beamTargetCell?: number }).beamTargetCell)
   
   // Game state variables removed - no longer needed for borders
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -259,6 +263,7 @@ export default function MapView() {
           />
         )}
         <g clipPath="url(#countryClip)">
+          {/* Render individual cells with unified styling */}
           {voronoiPolys
             .map((poly, i) => {
             if (!poly) {
@@ -273,26 +278,11 @@ export default function MapView() {
                 return null
               }
               console.warn(`No cell found for voronoi poly ${i}, using neutral`)
-              console.log(`Available cell IDs: [${storeCells.map(c => (c as { id: number }).id).join(', ')}]`)
-              console.log(`Voronoi poly count: ${voronoiPolys.length}, Store cells count: ${storeCells.length}`)
-              return (
-                <g key={`cell-${i}-neutral`}>
-                  <motion.path
-                    d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
-                    fill={BALANCE.neutrals.color}
-                    stroke="none"
-                    strokeWidth={0}
-                    initial={{ opacity: 0.5 }}
-                    animate={{ opacity: 0.5 }}
-                  />
-                </g>
-              )
+              return null
             }
             const owner = teams.find((t) => (t as { id: number }).id === (cell as { ownerTeamId: number }).ownerTeamId)
             const last = history[history.length - 1]
             const isCaptured = last && last.targetCellId === (cell as { id: number }).id
-            // isFrom and isTo removed - no longer needed
-            // isAttacker and isDefender removed - no longer needed
             const isDefenderTeam = last && last.defenderTeamId != null && (cell as { ownerTeamId: number }).ownerTeamId === last.defenderTeamId
             const isNeutral = (cell as { ownerTeamId: number }).ownerTeamId === -1 || (cell as { ownerTeamId: number }).ownerTeamId == null
             const isPreviewFrom = previewFrom === (cell as { id: number }).id
@@ -301,7 +291,16 @@ export default function MapView() {
             // lookup dual colors
             const club = owner ? (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (owner as { name: string }).name) : undefined
             const dual = mapColoring === "striped" && club?.colors
-            // fillUrl removed; team-wide patterns are defined in <defs>
+            
+            // Check if this cell is on the boundary of its territory
+            const isBoundaryCell = (() => {
+              if (!cell.neighbors) return false
+              return cell.neighbors.some(neighborId => {
+                const neighbor = storeCells.find(c => (c as { id: number }).id === neighborId)
+                return neighbor && (neighbor as { ownerTeamId: number }).ownerTeamId !== (cell as { ownerTeamId: number }).ownerTeamId
+              })
+            })()
+            
             return (
               <g key={`cell-${i}-${ownerId}-${turn}`}>
                 <motion.path
@@ -314,22 +313,98 @@ export default function MapView() {
                       ? `url(#team-stripe-${(owner as { id: number })?.id})`
                       : ((owner as { color?: string })?.color || "#ddd")
                   }
-                  stroke="none"
-                  strokeWidth={0}
-                  initial={{ opacity: isNeutral ? 0.5 : 0.95, scale: 1 }}
+                  stroke={
+                    isBoundaryCell && !isNeutral 
+                      ? "#000" 
+                      : "none"
+                  }
+                  strokeWidth={isBoundaryCell && !isNeutral ? 2 : 0}
+                  strokeOpacity={0.8}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  initial={{ opacity: isNeutral ? 0.5 : 0.95, scale: 1, filter: "blur(0px)" }}
                   animate={
                     isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam || (previewFromTeamId!=null && (owner as { id: number })?.id === previewFromTeamId)
-                      ? { opacity: 1, scale: 1.12 }
-                      : { opacity: isNeutral ? 0.5 : 0.95, scale: 1 }
+                      ? { opacity: 1, scale: 1.12, filter: "blur(0px)" }
+                      : previewFromTeamId != null && !isNeutral
+                      ? { opacity: 0.4, scale: 1, filter: "blur(2px)" }
+                      : { opacity: isNeutral ? 0.5 : 0.95, scale: 1, filter: "blur(0px)" }
                   }
                   transition={{ type: "spring", stiffness: 260, damping: 24 }}
                 >
                   <title>{`${(owner as { name?: string })?.name ?? (isNeutral ? 'Neutral' : 'Team')} • cell ${(cell as { id: number }).id}`}</title>
                 </motion.path>
+                
+                {/* Victory/Defeat animations on captured cell */}
+                {isCaptured && last && (
+                  <>
+                    {last.attackerWon ? (
+                      // Victory animation - expanding wave
+                      <>
+                        <motion.path
+                          d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
+                          fill="none"
+                          stroke="#10b981"
+                          strokeWidth="4"
+                          initial={{ opacity: 0, strokeWidth: 0 }}
+                          animate={{ opacity: [0, 1, 0], strokeWidth: [0, 8, 0] }}
+                          transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
+                        />
+                        {/* Victory sparkles */}
+                        <motion.text
+                          x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length)}
+                          y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length)}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          fontSize="32"
+                          initial={{ opacity: 0, scale: 0, rotate: 0 }}
+                          animate={{ 
+                            opacity: [0, 1, 1, 0],
+                            scale: [0, 1.5, 1.5, 0.5],
+                            rotate: [0, 180, 360]
+                          }}
+                          transition={{ duration: 1.5, ease: "easeOut" }}
+                        >
+                          ⭐
+                        </motion.text>
+                      </>
+                    ) : (
+                      // Defeat animation - collapsing
+                      <>
+                        <motion.path
+                          d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
+                          fill="none"
+                          stroke="#ef4444"
+                          strokeWidth="4"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: [0, 1, 0] }}
+                          transition={{ duration: 1, ease: "easeOut", delay: 0.2 }}
+                        />
+                        {/* Defeat symbol */}
+                        <motion.text
+                          x={(poly.reduce((sum, p) => sum + p[0], 0) / poly.length)}
+                          y={(poly.reduce((sum, p) => sum + p[1], 0) / poly.length)}
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                          fontSize="28"
+                          initial={{ opacity: 0, scale: 2 }}
+                          animate={{ 
+                            opacity: [0, 1, 1, 0],
+                            scale: [2, 0.8, 0.8, 0]
+                          }}
+                          transition={{ duration: 1.5, ease: "easeOut" }}
+                        >
+                          💥
+                        </motion.text>
+                      </>
+                    )}
+                  </>
+                )}
                 {/* Team label moved to overlay to ensure topmost layering */}
               </g>
             )
           })}
+          
           {((history.length > 0 && !(useGameStore.getState() as { suppressLastOverlay?: boolean }).suppressLastOverlay) || (previewFrom!=null && previewTo!=null)) && (() => {
             const last = history[history.length - 1]
             // Use preview values if available, otherwise use last history
@@ -621,6 +696,195 @@ export default function MapView() {
             </g>
           )
         })}
+        
+        {/* Rotating Arrow for Direction Selection */}
+        {rotatingArrowTeamId != null && rotatingArrowAngle != null && (() => {
+          const arrowTeam = teams.find(t => (t as { id: number }).id === rotatingArrowTeamId)
+          if (!arrowTeam) return null
+          
+          const teamCells = storeCells.filter((cell) => (cell as { ownerTeamId: number }).ownerTeamId === rotatingArrowTeamId)
+          if (teamCells.length === 0) return null
+          
+          // Calculate team center
+          let totalX = 0, totalY = 0
+          for (const cell of teamCells) {
+            const cellData = cell as { id: number, centroid: [number, number] }
+            const voronoiPoly = voronoiPolys[cellData.id]
+            if (voronoiPoly && voronoiPoly.length > 0) {
+              const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+              const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+              totalX += sumX / voronoiPoly.length
+              totalY += sumY / voronoiPoly.length
+            }
+          }
+          const centerX = totalX / teamCells.length
+          const centerY = totalY / teamCells.length
+          
+          // Arrow length
+          const arrowLength = 100
+          const angle = (rotatingArrowAngle - 90) * Math.PI / 180 // Adjust for SVG coords
+          const endX = centerX + Math.cos(angle) * arrowLength
+          const endY = centerY + Math.sin(angle) * arrowLength
+          
+          return (
+            <g key={`rotating-arrow-${rotatingArrowTeamId}`}>
+              {/* Arrow glow */}
+              <defs>
+                <filter id="arrowGlow">
+                  <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                  <feMerge>
+                    <feMergeNode in="coloredBlur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+              </defs>
+              
+              {/* Arrow line */}
+              <line
+                x1={centerX}
+                y1={centerY}
+                x2={endX}
+                y2={endY}
+                stroke="#fbbf24"
+                strokeWidth="6"
+                strokeLinecap="round"
+                filter="url(#arrowGlow)"
+                opacity={0.9}
+              />
+              
+              {/* Arrow head */}
+              <polygon
+                points={`${endX},${endY} ${endX - 12 * Math.cos(angle - 0.5)},${endY - 12 * Math.sin(angle - 0.5)} ${endX - 12 * Math.cos(angle + 0.5)},${endY - 12 * Math.sin(angle + 0.5)}`}
+                fill="#fbbf24"
+                stroke="#ffffff"
+                strokeWidth="2"
+                filter="url(#arrowGlow)"
+              />
+              
+              {/* Center circle */}
+              <circle
+                cx={centerX}
+                cy={centerY}
+                r="8"
+                fill="#fbbf24"
+                stroke="#ffffff"
+                strokeWidth="3"
+                filter="url(#arrowGlow)"
+              />
+            </g>
+          )
+        })()}
+        
+        {/* Energy Beam to Target */}
+        {beamActive && beamTargetCell != null && rotatingArrowTeamId != null && (() => {
+          const teamCells = storeCells.filter((cell) => (cell as { ownerTeamId: number }).ownerTeamId === rotatingArrowTeamId)
+          if (teamCells.length === 0) return null
+          
+          // Calculate team center (beam start)
+          let totalX = 0, totalY = 0
+          for (const cell of teamCells) {
+            const cellData = cell as { id: number, centroid: [number, number] }
+            const voronoiPoly = voronoiPolys[cellData.id]
+            if (voronoiPoly && voronoiPoly.length > 0) {
+              const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+              const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+              totalX += sumX / voronoiPoly.length
+              totalY += sumY / voronoiPoly.length
+            }
+          }
+          const startX = totalX / teamCells.length
+          const startY = totalY / teamCells.length
+          
+          // Find the target cell and go directly to it
+          const targetCell = storeCells.find((c) => (c as { id: number }).id === beamTargetCell) as { centroid: [number, number], id: number } | undefined
+          if (!targetCell) return null
+          
+          // Calculate target position (use voronoi poly centroid if available)
+          const targetPoly = voronoiPolys[targetCell.id]
+          let endX = targetCell.centroid[0]
+          let endY = targetCell.centroid[1]
+          if (targetPoly && targetPoly.length > 0) {
+            const sumX = targetPoly.reduce((sum, point) => sum + point[0], 0)
+            const sumY = targetPoly.reduce((sum, point) => sum + point[1], 0)
+            endX = sumX / targetPoly.length
+            endY = sumY / targetPoly.length
+          }
+          
+          
+          return (
+            <g key="energy-beam">
+              <defs>
+                <linearGradient id="beamGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#fbbf24" stopOpacity="0.2" />
+                  <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.9" />
+                  <stop offset="100%" stopColor="#ef4444" stopOpacity="0.2" />
+                </linearGradient>
+                <filter id="beamGlow">
+                  <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+                  <feMerge>
+                    <feMergeNode in="coloredBlur"/>
+                    <feMergeNode in="coloredBlur"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+              </defs>
+              
+              {/* Animated beam */}
+              <motion.line
+                x1={startX}
+                y1={startY}
+                x2={endX}
+                y2={endY}
+                stroke="url(#beamGradient)"
+                strokeWidth="12"
+                strokeLinecap="round"
+                filter="url(#beamGlow)"
+                initial={{ opacity: 0, strokeWidth: 0 }}
+                animate={{ 
+                  opacity: [0, 1, 0.8, 1, 0],
+                  strokeWidth: [0, 18, 12, 18, 0]
+                }}
+                transition={{ duration: 0.8, ease: "easeInOut" }}
+              />
+              
+              {/* Impact effect at target cell */}
+              {(() => {
+                // Use the same target position as the beam
+                const targetX = endX
+                const targetY = endY
+                
+                return (
+                  <>
+                    {/* Impact burst */}
+                    <motion.circle
+                      cx={targetX}
+                      cy={targetY}
+                      r="20"
+                      fill="none"
+                      stroke="#fbbf24"
+                      strokeWidth="4"
+                      filter="url(#beamGlow)"
+                      initial={{ r: 0, opacity: 1 }}
+                      animate={{ r: [0, 50], opacity: [1, 0] }}
+                      transition={{ duration: 0.6, ease: "easeOut" }}
+                    />
+                    <motion.circle
+                      cx={targetX}
+                      cy={targetY}
+                      r="20"
+                      fill="#fbbf24"
+                      opacity="0.6"
+                      filter="url(#beamGlow)"
+                      initial={{ r: 0, opacity: 0 }}
+                      animate={{ r: [0, 30, 0], opacity: [0, 0.9, 0] }}
+                      transition={{ duration: 0.8, ease: "easeOut" }}
+                    />
+                  </>
+                )
+              })()}
+            </g>
+          )
+        })()}
       </svg>
     </div>
   )
