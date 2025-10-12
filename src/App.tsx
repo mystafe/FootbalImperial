@@ -369,7 +369,7 @@ function App() {
                 {/* Version Tooltip */}
                 <div className="absolute -top-8 -right-12 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:-translate-y-1 z-50">
                   <div className="bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-bold rounded-lg px-4 py-2 text-base shadow-2xl border-2 border-white/20 whitespace-nowrap">
-                    v0.3.2
+                    v0.3.4
                   </div>
                 </div>
               </div>
@@ -694,12 +694,7 @@ function App() {
                   {uiStep !== "team" && teamWinner === null && (
                       <button
                         onClick={() => {
-                          setUiStep("team")
-                          // Select team using weighted algorithm
-                          const targetIndex = pickWeightedTeamIndex()
-                          console.log('🎯 Setting teamSpinTarget:', targetIndex, 'Team:', liveTeams[targetIndex]?.name)
-                          setTeamSpinTarget(targetIndex)
-                          // Clear all blurs, previews, and victory traces from previous turn
+                          // ÖNCE TÜM STATE'LERİ TEMİZLE (Spinner başlamadan önce!)
                           try {
                             setSuppressLastOverlay(true)
                             setPreviewTarget(undefined, undefined)
@@ -717,6 +712,12 @@ function App() {
                           } catch (e) {
                             console.warn(e)
                           }
+                          
+                          // SONRA spinner başlat
+                          setUiStep("team")
+                          const targetIndex = pickWeightedTeamIndex()
+                          console.log('🎯 Setting teamSpinTarget:', targetIndex, 'Team:', liveTeams[targetIndex]?.name)
+                          setTeamSpinTarget(targetIndex)
                         }}
                         className="group relative overflow-hidden bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-400 hover:to-orange-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20 w-full"
                         disabled={disabledTeamBtn}
@@ -747,13 +748,12 @@ function App() {
                         Yön seçiliyor...
                           </div>
                             <button
+                        data-dir-select-btn
                         className="group relative overflow-hidden bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20"
                                 onClick={() => {
                           if (teamWinner == null) return
                           const attacker = teams.find(t => t.id === teamWinner)
                           if (!attacker) return
-                          
-                          setUiStep("dir")
                           
                           // Find a valid target by trying directions until we find one
                           let targetDirIndex = -1
@@ -769,10 +769,19 @@ function App() {
                           }
                           
                           if (!targetResult) {
-                            setToast("❌ Geçerli hedef bulunamadı! Tekrar deneyin.")
-                            // Stay in dir-select state so user can try again
-                                    return
+                            // Auto-retry: Click the button again after a short delay
+                            console.log('🎯 No target found, auto-retrying...')
+                            setToast("🔄 Yön aranıyor...")
+                            setTimeout(() => {
+                              // Trigger button click again
+                              const btn = document.querySelector('[data-dir-select-btn]') as HTMLButtonElement
+                              if (btn) btn.click()
+                            }, 500)
+                            return
                           }
+                          
+                          // Target found! Now proceed with direction animation
+                          setUiStep("dir")
                           
                           // Calculate the actual direction from attacker to target
                           const attackerCells = cells.filter((c) => c.ownerTeamId === attacker.id)
