@@ -54,6 +54,7 @@ export default function MapView({
   const rotatingArrowAngle = useGameStore((s) => (s as { rotatingArrowAngle?: number }).rotatingArrowAngle)
   const beamActive = useGameStore((s) => (s as { beamActive?: boolean }).beamActive)
   const beamTargetCell = useGameStore((s) => (s as { beamTargetCell?: number }).beamTargetCell)
+  const suppressLastOverlay = useGameStore((s) => (s as { suppressLastOverlay?: boolean }).suppressLastOverlay)
   
   // Game state variables removed - no longer needed for borders
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -351,8 +352,8 @@ export default function MapView({
             }
             const owner = teams.find((t) => (t as { id: number }).id === (cell as { ownerTeamId: number }).ownerTeamId)
             const last = history[history.length - 1]
-            const isCaptured = last && last.targetCellId === (cell as { id: number }).id && last.turn === turn
-            const isDefenderTeam = last && last.defenderTeamId != null && (cell as { ownerTeamId: number }).ownerTeamId === last.defenderTeamId && last.turn === turn
+            const isCaptured = last && last.targetCellId === (cell as { id: number }).id && last.turn === turn && !suppressLastOverlay
+            const isDefenderTeam = last && last.defenderTeamId != null && (cell as { ownerTeamId: number }).ownerTeamId === last.defenderTeamId && last.turn === turn && !suppressLastOverlay
             const isNeutral = (cell as { ownerTeamId: number }).ownerTeamId === -1 || (cell as { ownerTeamId: number }).ownerTeamId == null
             const isPreviewFrom = previewFrom === (cell as { id: number }).id
             const isPreviewTo = previewTo === (cell as { id: number }).id
@@ -521,12 +522,9 @@ export default function MapView({
             const attackerTeamId = last?.attackerTeamId
             const attackerCells = storeCells.filter((c) => (c as { ownerTeamId: number }).ownerTeamId === attackerTeamId)
             
-            console.log(`🎯 Debug: attackerTeamId=${attackerTeamId}, attackerCells.length=${attackerCells.length}`)
-            
             // Fallback to from cell if attacker cells not found
             let attackerCenter: [number, number]
             if (attackerCells.length === 0) {
-              console.log(`🎯 Fallback: Using from cell centroid`)
               attackerCenter = (from as { centroid: [number, number] }).centroid
             } else {
               // Calculate attacker's center from all their cells
@@ -535,11 +533,7 @@ export default function MapView({
               attackerCenter = [sumX / attackerCells.length, sumY / attackerCells.length]
             }
             
-            console.log(`🎯 Attacker Center: (${attackerCenter[0].toFixed(1)}, ${attackerCenter[1].toFixed(1)})`)
-            
             const [sx, sy] = attackerCenter
-            
-            console.log(`🎯 Direction calc input: rotatingArrowAngle=${rotatingArrowAngle}, last?.direction=${last?.direction}`)
             
             // Get the selected direction from rotating arrow angle, not history
             const selectedDirection = rotatingArrowAngle != null ? 
@@ -556,19 +550,29 @@ export default function MapView({
                 if (normalizedAngle >= 292.5 && normalizedAngle < 337.5) return 'SE'
                 return 'S'
               })() : (last?.direction || 'S')
-            console.log(`🎯 Attack arrow direction [v2]: ${selectedDirection} (from angle: ${rotatingArrowAngle}, fallback: ${last?.direction})`)
+            
+            // 🔍 ARROW DEBUG - Yön hesaplaması
+            const normalizedForLog = rotatingArrowAngle != null ? ((rotatingArrowAngle % 360) + 360) % 360 : null
+            console.log('🎯 ARROW DIRECTION:', {
+              angle: rotatingArrowAngle?.toFixed(1),
+              normalized: normalizedForLog?.toFixed(1),
+              direction: selectedDirection,
+              expected: '✅ Check visually'
+            })
             
             // Calculate direction vector based on selected direction
-            // SVG coordinate system: E=0°, N=270°, W=180°, S=90°
+            // Map arrow angle to Math.cos/sin angles
+            // In SVG: right=0°, down=90°, left=180°, up=270°
+            // But we need to map game directions to visual arrows
             const dirAngle: Record<string, number> = {
-              E: 0,    // Right
-              NE: 315, // Right-Up (315°)
-              N: 270,  // Up
-              NW: 225, // Left-Up (225°)
-              W: 180,  // Left
-              SW: 135, // Left-Down (135°)
-              S: 90,   // Down
-              SE: 45   // Right-Down (45°)
+              E: 0,    // Right → 0°
+              SE: 45,  // Right-Down → 45°
+              S: 90,   // Down → 90°
+              SW: 135, // Left-Down → 135°
+              W: 180,  // Left → 180°
+              NW: 225, // Left-Up → 225°
+              N: 270,  // Up → 270°
+              NE: 315  // Right-Up → 315°
             }
             
             const deg = dirAngle[selectedDirection] || 90
@@ -582,9 +586,6 @@ export default function MapView({
             const ex = sx + ndx * arrowLength
             const ey = sy + ndy * arrowLength
             
-            console.log(`🎯 Arrow: Start(${sx.toFixed(1)}, ${sy.toFixed(1)}) → End(${ex.toFixed(1)}, ${ey.toFixed(1)})`)
-            console.log(`🎯 Arrow calc: direction=${selectedDirection}, deg=${deg}, ndx=${ndx.toFixed(3)}, ndy=${ndy.toFixed(3)}`)
-            
             const mx = (sx + ex) / 2
             const my = (sy + ey) / 2 - 24
             // attacker removed - no longer needed for arrows
@@ -595,8 +596,6 @@ export default function MapView({
             const cx = mx
             const cy = my
             const pathD = `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}`
-            
-            console.log(`🎯 Arrow path: ${pathD}`)
 
             // Attack arrows removed - no longer needed
             return null
@@ -841,13 +840,6 @@ export default function MapView({
           const endX = centerX + Math.cos(angle) * arrowLength
           const endY = centerY + Math.sin(angle) * arrowLength
           
-          console.log('🎯 Arrow Debug:', {
-            rotatingArrowAngle,
-            centerPos: [centerX, centerY],
-            endPos: [endX, endY],
-            angle: angle * 180 / Math.PI
-          })
-          
           return (
             <g key={`rotating-arrow-${rotatingArrowTeamId}`}>
               {/* Arrow glow */}
@@ -917,36 +909,62 @@ export default function MapView({
           const startX = totalX / teamCells.length
           const startY = totalY / teamCells.length
           
-          // Use arrow angle to determine beam direction (beam should follow arrow direction)
+          // Simple beam direction: use arrow angle to determine beam endpoint
           let endX = startX
           let endY = startY
           
-          // Always use arrow direction for beam, not target cell
           if (rotatingArrowAngle !== null && rotatingArrowAngle !== undefined) {
-            const angleRad = ((rotatingArrowAngle - 90) * Math.PI) / 180
-            const beamLength = 300 // Increased beam length for better visibility
+            // Convert arrow angle to beam direction
+            // Arrow angle is already in the correct coordinate system
+            const angleRad = (rotatingArrowAngle * Math.PI) / 180
+            const beamLength = 300
             endX = startX + Math.cos(angleRad) * beamLength
             endY = startY + Math.sin(angleRad) * beamLength
-            console.log('🎯 Beam Debug [Arrow Direction]:', {
-              rotatingArrowAngle,
-              angleRad,
-              startPos: [startX, startY],
-              endPos: [endX, endY],
-              beamLength
-            })
-          } else {
-            // Fallback to target cell if no arrow angle
-            const targetCell = storeCells.find((c) => (c as { id: number }).id === beamTargetCell) as { centroid: [number, number], id: number } | undefined
+            
+            // Find the actual target cell that the beam hits
+            const beamDir = [Math.cos(angleRad), Math.sin(angleRad)]
+            let closestHit = null
+            let closestDistance = Infinity
+            
+            // Check all cells to find the one in beam direction
+            for (const cell of storeCells) {
+              const cellData = cell as { id: number, ownerTeamId: number, centroid: [number, number] }
+              
+              // Skip attacker's own cells
+              if (cellData.ownerTeamId === rotatingArrowTeamId) continue
+              
+              // Check if this cell is in the beam direction
+              const dx = cellData.centroid[0] - startX
+              const dy = cellData.centroid[1] - startY
+              const dot = dx * beamDir[0] + dy * beamDir[1]
+              
+              // If cell is in beam direction (positive dot product)
+              if (dot > 0) {
+                const distance = Math.sqrt(dx * dx + dy * dy)
+                if (distance < closestDistance) {
+                  closestDistance = distance
+                  closestHit = cellData
+                }
+              }
+            }
+            
+            // Update beam target if we found a hit
+            if (closestHit && beamTargetCell !== closestHit.id) {
+              // Defer state update to avoid setState during render
+              setTimeout(() => {
+                useGameStore.getState().setBeam?.(true, closestHit.id)
+              }, 0)
+              
+              // Update beam endpoint to hit the target
+              endX = closestHit.centroid[0]
+              endY = closestHit.centroid[1]
+            }
+          } else if (beamTargetCell != null) {
+            // Fallback: use existing beam target
+            const targetCell = storeCells.find((c) => (c as { id: number }).id === beamTargetCell)
             if (targetCell) {
-              const targetPoly = voronoiPolys[targetCell.id]
               endX = targetCell.centroid[0]
               endY = targetCell.centroid[1]
-              if (targetPoly && targetPoly.length > 0) {
-                const sumX = targetPoly.reduce((sum, point) => sum + point[0], 0)
-                const sumY = targetPoly.reduce((sum, point) => sum + point[1], 0)
-                endX = sumX / targetPoly.length
-                endY = sumY / targetPoly.length
-              }
             }
           }
           

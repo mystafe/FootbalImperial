@@ -55,6 +55,9 @@ function App() {
       (s as unknown as { setBeam: (active: boolean, targetCell?: number) => void })
         .setBeam
   )
+  const beamTargetCell = useGameStore(
+    (s) => (s as unknown as { beamTargetCell?: number }).beamTargetCell
+  )
 
   const [teamWinner, setTeamWinner] = useState<number | null>(null)
   const [dirWinner, setDirWinner] = useState<number | null>(null)
@@ -369,7 +372,7 @@ function App() {
                 {/* Version Tooltip */}
                 <div className="absolute -top-8 -right-12 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:-translate-y-1 z-50">
                   <div className="bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-bold rounded-lg px-4 py-2 text-base shadow-2xl border-2 border-white/20 whitespace-nowrap">
-                    v0.3.4
+                    v0.4.6
                   </div>
                 </div>
               </div>
@@ -783,7 +786,11 @@ function App() {
                           // Target found! Now proceed with direction animation
                           setUiStep("dir")
                           
-                          // Calculate the actual direction from attacker to target
+                          // Set the actual direction for later use
+                          const selectedDirection = DIRECTIONS[targetDirIndex]
+                          setActualDirection(selectedDirection)
+                          
+                          // Calculate arrow angle from attacker to target
                           const attackerCells = cells.filter((c) => c.ownerTeamId === attacker.id)
                           if (attackerCells.length === 0) return
                           
@@ -800,62 +807,31 @@ function App() {
                           
                           const [tx, ty] = targetCell.centroid
                           
-                          // Calculate actual angle from attacker to target
-                          // Note: SVG Y-axis is inverted, so flip dy for correct angle calculation
+                          // Calculate arrow angle from attacker to target
                           const dx = tx - ax
-                          const dy = ay - ty  // Inverted for SVG coordinates
-                          const targetAngle = (Math.atan2(dy, dx) * 180) / Math.PI
+                          const dy = ty - ay  // Standard coordinate system
+                          const arrowAngle = (Math.atan2(dy, dx) * 180) / Math.PI
                           
-                          // Find the closest direction to the actual target angle
-                          const dirAngleMap: Record<string, number> = {
-                            N: 90, NE: 45, E: 0, SE: -45, 
-                            S: -90, SW: -135, W: 180, NW: 135
-                          }
-                          let closestDirection = "E"
-                          let minDiff = Infinity
-                          for (const [dir, angle] of Object.entries(dirAngleMap)) {
-                            const diff = Math.abs(((targetAngle - angle + 180) % 360) - 180)
-                            if (diff < minDiff) {
-                              minDiff = diff
-                              closestDirection = dir
-                            }
-                          }
-                          setActualDirection(closestDirection)
-                          
-                          // Update dirWinner to match the actual direction found
-                          const actualDirIndex = DIRECTIONS.indexOf(closestDirection as Direction)
-                          if (actualDirIndex !== -1) {
-                            setDirWinner(actualDirIndex)
-                          }
-                          
-                          // Verify that the found target is actually in the selected direction
-                          const selectedDirection = DIRECTIONS[targetDirIndex]
-                          const expectedAngle = dirAngleMap[selectedDirection]
-                          const angleDiff = Math.abs(((targetAngle - expectedAngle + 180) % 360) - 180)
-                          if (angleDiff > 45) {
-                            console.warn(`Target ${angleDiff.toFixed(1)}° away from selected direction ${selectedDirection}`)
-                          }
-                          
-                          // Start rotation animation
+                          // Start simple rotation animation
                           setRotatingArrow(attacker.id, 0)
                           
-                          // Rotate arrow with animation
+                          // Simple rotation animation
                           const duration = 2500
                           const startTime = Date.now()
-                          const spins = 3 // Number of full rotations
+                          const spins = 3
                           
                           const animateArrow = () => {
                             const elapsed = Date.now() - startTime
                             if (elapsed < duration) {
                               const progress = elapsed / duration
                               const eased = 1 - Math.pow(1 - progress, 3) // easeOut cubic
-                              const currentAngle = (spins * 360 * eased + targetAngle * eased) % 360
+                              const currentAngle = (spins * 360 * eased) % 360
                               setRotatingArrow(attacker.id, currentAngle)
                               requestAnimationFrame(animateArrow)
                             } else {
-                              setRotatingArrow(attacker.id, targetAngle)
+                              // Stop at final angle (0 degrees = East)
+                              setRotatingArrow(attacker.id, 0)
                               
-                              // Use the pre-calculated target
                               setTimeout(() => {
                                 // Activate beam animation
                                 setBeam(true, targetResult.toCellId)
@@ -941,64 +917,32 @@ function App() {
                           
                           const [tx, ty] = targetCell.centroid
                           
-                          // Calculate actual angle from attacker to target
-                          // Note: SVG Y-axis is inverted, so flip dy for correct angle calculation
+                          // Calculate arrow angle from attacker to target
                           const dx = tx - ax
-                          const dy = ay - ty  // Inverted for SVG coordinates
-                          const targetAngle = (Math.atan2(dy, dx) * 180) / Math.PI
+                          const dy = ty - ay  // Standard coordinate system
+                          const arrowAngle = (Math.atan2(dy, dx) * 180) / Math.PI
                           
-                          // Find the closest direction to the actual target angle
-                          const dirAngleMap: Record<string, number> = {
-                            N: 90, NE: 45, E: 0, SE: -45, 
-                            S: -90, SW: -135, W: 180, NW: 135
-                          }
-                          let closestDirection = "E"
-                          let minDiff = Infinity
-                          for (const [dir, angle] of Object.entries(dirAngleMap)) {
-                            const diff = Math.abs(((targetAngle - angle + 180) % 360) - 180)
-                            if (diff < minDiff) {
-                              minDiff = diff
-                              closestDirection = dir
-                            }
-                          }
-                          setActualDirection(closestDirection)
-                          
-                          // Update dirWinner to match the actual direction found
-                          const actualDirIndex = DIRECTIONS.indexOf(closestDirection as Direction)
-                          if (actualDirIndex !== -1) {
-                            setDirWinner(actualDirIndex)
-                          }
-                          
-                          // Verify that the found target is actually in the selected direction
-                          const selectedDirection = DIRECTIONS[targetDirIndex]
-                          const expectedAngle = dirAngleMap[selectedDirection]
-                          const angleDiff = Math.abs(((targetAngle - expectedAngle + 180) % 360) - 180)
-                          if (angleDiff > 45) {
-                            console.warn(`Target ${angleDiff.toFixed(1)}° away from selected direction ${selectedDirection}`)
-                          }
-                          
-                          // Start rotation animation
+                          // Start simple rotation animation
                           setRotatingArrow(attacker.id, 0)
                           
-                          // Rotate arrow with animation
+                          // Simple rotation animation
                           const duration = 2500
                           const startTime = Date.now()
-                          const spins = 3 // Number of full rotations
+                          const spins = 3
                           
                           const animateArrow = () => {
                             const elapsed = Date.now() - startTime
                             if (elapsed < duration) {
                               const progress = elapsed / duration
                               const eased = 1 - Math.pow(1 - progress, 3) // easeOut cubic
-                              const currentAngle = (spins * 360 * eased + targetAngle * eased) % 360
+                              const currentAngle = (spins * 360 * eased) % 360
                               setRotatingArrow(attacker.id, currentAngle)
                               requestAnimationFrame(animateArrow)
                             } else {
-                              setRotatingArrow(attacker.id, targetAngle)
+                              // Stop at final angle (0 degrees = East)
+                              setRotatingArrow(attacker.id, 0)
                               
-                              // Use the pre-calculated target
-                                setTimeout(() => {
-
+                              setTimeout(() => {
                                 // Activate beam animation
                                 setBeam(true, targetResult.toCellId)
                                   
@@ -1045,11 +989,19 @@ function App() {
                         className="group relative overflow-hidden bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 text-white font-bold py-4 px-8 rounded-2xl shadow-2xl transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20 w-full"
                         disabled={disabledApplyBtn}
                         onClick={() => {
-                          if (teamWinner == null || dirWinner == null) return
+                          if (teamWinner == null) return
                           const attackerTeam = teams.find(t => t.id === teamWinner)
-                          // Use the actual direction that was found, or fallback to selected direction
-                          const dir = (actualDirection ? actualDirection : DIRECTIONS[dirWinner]) as Direction
                           if (!attackerTeam) return
+                          
+                          // Use resolveTarget to find the attack target
+                          const dir = (actualDirection ? actualDirection : DIRECTIONS[dirWinner]) as Direction
+                          const targetResult = resolveTarget(attackerTeam.id, dir)
+                          
+                          if (!targetResult) {
+                            setToast("❌ Hedef bulunamadı!")
+                            return
+                          }
+                          
                           playClick()
                           setUiStep("attacking")
                           // Freeze map at current snapshot during animation & toast
@@ -1061,6 +1013,8 @@ function App() {
                             console.warn(e)
                           }
                           setTimeout(() => {
+                            // Use the direction from actualDirection or fallback to dirWinner
+                            const dir = (actualDirection ? actualDirection : DIRECTIONS[dirWinner]) as Direction
                             const r = applyAttack(attackerTeam.id, dir)
                             if (!r.success) {
                             setToast("Uygun hedef bulunamadı. Tekrar deneyin.")

@@ -335,7 +335,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       return Math.abs(d)
     }
     const toDeg = (x: number, y: number) => (Math.atan2(y, x) * 180) / Math.PI
-    const tolerance = 60
+    const tolerance = 90 // Increased tolerance for better target finding
     let bestAlong = Infinity
     let bestPerp = Infinity
     let bestFromId: number | null = null
@@ -363,7 +363,17 @@ export const useGameStore = create<GameState>((set, get) => ({
         }
       }
     }
-    if (bestToId == null) return null
+    if (bestToId == null) {
+      // Ultimate fallback: find any neighboring cell of different owner
+      for (const c of attackerCells) {
+        for (const nIdx of c.neighbors || []) {
+          const nb = state.cells[nIdx]
+          if (!nb || nb.ownerTeamId === attackerTeamId) continue
+          return { fromCellId: c.id, toCellId: nb.id }
+        }
+      }
+      return null
+    }
     return { fromCellId: bestFromId as number, toCellId: bestToId as number }
   },
   applyAttack: (attackerTeamId: number, direction: Direction) => {
