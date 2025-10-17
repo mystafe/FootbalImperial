@@ -54,7 +54,7 @@ function App() {
 
   const [teamWinner, setTeamWinner] = useState<number | null>(null)
   const [uiStep, setUiStep] = useState<
-    "team" | "dir" | "attacking" | null
+    "team" | "dir" | "attacking" | "direction-ready" | "direction-spinning" | null
   >(null)
   const [teamSpinTarget, setTeamSpinTarget] = useState<number | undefined>(
     undefined
@@ -154,16 +154,6 @@ function App() {
     resolveTarget
   ])
 
-  const DIR_TR: Record<string, string> = {
-    N: "Kuzey",
-    NE: "Kuzey Doğu",
-    E: "Doğu",
-    SE: "Güney Doğu",
-    S: "Güney",
-    SW: "Güney Batı",
-    W: "Batı",
-    NW: "Kuzey Batı"
-  }
 
   const pickWeightedTeamIndex = () => {
     if (liveTeams.length === 0) return 0
@@ -653,7 +643,6 @@ function App() {
                           
                           // Debug: Log the beam direction
                           console.log('🎯 Beam direction angleRad:', angleRad, 'Math.cos:', Math.cos(angleRad), 'Math.sin:', Math.sin(angleRad))
-                          const beamLength = 500
                           
                           // Find target in beam direction
                           const attackerCells = cells.filter(c => c.ownerTeamId === attacker.id)
@@ -877,8 +866,8 @@ function App() {
             aria-label="Spin Team"
             className="rounded bg-indigo-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             onClick={() => {
-              const idx = pickWeightedTeamIndex()
-              setTeamWinner(idx)
+              const teamIndex = pickWeightedTeamIndex()
+              setTeamWinner(teamIndex)
             }}
           >
             Team
@@ -887,13 +876,7 @@ function App() {
             aria-label="Spin Direction"
             className="rounded bg-indigo-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500"
             onClick={() => {
-              const idx = Math.max(
-                0,
-                Math.min(
-                  DIRECTIONS.length - 1,
-                  Math.floor(rngRef.current() * DIRECTIONS.length)
-                )
-              )
+              // Direction selection logic removed
             }}
           >
             Dir

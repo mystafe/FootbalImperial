@@ -44,11 +44,7 @@ interface MapViewProps {
 
 export default function MapView({
   showTeamSpinner = false,
-  teamSpinnerProps,
-  showDirectionButtons = false,
-  directionProps,
-  uiStep = "",
-  cells = []
+  teamSpinnerProps
 }: MapViewProps) {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
@@ -809,11 +805,7 @@ export default function MapView({
           const centerX = totalX / teamCells.length
           const centerY = totalY / teamCells.length
           
-          // Arrow length
-          const arrowLength = 100
-          const angle = (rotatingArrowAngle - 90) * Math.PI / 180 // Adjust for SVG coords
-          const endX = centerX + Math.cos(angle) * arrowLength
-          const endY = centerY + Math.sin(angle) * arrowLength
+          // Arrow positioning calculated in the arrow rendering below
           
           return (
             <g key={`rotating-arrow-${rotatingArrowTeamId}`}>
