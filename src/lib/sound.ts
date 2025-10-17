@@ -2,21 +2,17 @@
 // These are placeholder functions - you can implement actual sound playing here
 
 export const playCapture = () => {
-  // Play capture sound effect
-  console.log("🎵 Capture sound")
+  // Intentionally no-op (avoid noisy logs in production)
 }
 
 export const playClick = () => {
-  // Play click sound effect
-  console.log("🎵 Click sound")
+  // Intentionally no-op (avoid noisy logs in production)
 }
 
 export const playVictory = () => {
-  // Play victory sound effect
-  console.log("🎵 Victory sound")
+  // Intentionally no-op (avoid noisy logs in production)
 }
 
 export const playDefeat = () => {
-  // Play defeat sound effect
-  console.log("🎵 Defeat sound")
+  // Intentionally no-op (avoid noisy logs in production)
 }

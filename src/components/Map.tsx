@@ -8,7 +8,7 @@ import { polygonCentroid } from "d3-polygon"
 import { createRng } from "../lib/random"
 import { COUNTRY_CLUBS } from "../data/clubs"
 import { motion } from "framer-motion"
-import { Spinner } from "./Spinner"
+import ModernSpinner from "./ModernSpinner"
 import { BALANCE } from "../data/balance"
 
 const COUNTRY_NAME_TO_ID: Record<string, number | undefined> = {
@@ -31,11 +31,24 @@ interface MapViewProps {
     fullNames?: string[]
     onDone?: (index: number) => void
   }
+  showDirectionButtons?: boolean
+  directionProps?: {
+    attackerTeam?: any
+    onDirectionSelect?: (direction: string) => void
+    onConfirmAttack?: () => void
+    canAttack?: boolean
+  }
+  uiStep?: string
+  cells?: any[]
 }
 
 export default function MapView({
   showTeamSpinner = false,
-  teamSpinnerProps
+  teamSpinnerProps,
+  showDirectionButtons = false,
+  directionProps,
+  uiStep = "",
+  cells = []
 }: MapViewProps) {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
@@ -276,17 +289,19 @@ export default function MapView({
   }, [voronoiPolys, teamColors, points, setTeamsAndCells, selected, numTeams, mapColoring, size.w, size.h, seed, teams.length, storeCells.length])
 
   return (
-    <div className="relative w-full h-full">
+    <div className="relative w-full h-full max-w-6xl mx-auto p-4">
+      {/* Glassmorphism Container */}
+      <div className="relative rounded-2xl overflow-hidden backdrop-blur-xl border border-white/20 shadow-2xl"
+           style={{
+             background: 'linear-gradient(135deg, rgba(255,255,255,0.1), rgba(255,255,255,0.05))',
+             boxShadow: '0 8px 32px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)'
+           }}>
       {/* Controls hidden during game */}
       <svg
         ref={svgRef}
         width={size.w}
         height={size.h}
-        className={`w-full h-auto rounded border border-gray-200 transition-all duration-500 ${
-          showTeamSpinner 
-            ? 'blur-sm opacity-50' 
-            : 'blur-0 opacity-100'
-        }`}
+        className="w-full h-auto rounded-lg transition-all duration-500"
       >
         <defs>
           <linearGradient id="ocean" x1="0" y1="0" x2="0" y2="1">
@@ -352,6 +367,11 @@ export default function MapView({
             }
             const owner = teams.find((t) => (t as { id: number }).id === (cell as { ownerTeamId: number }).ownerTeamId)
             const last = history[history.length - 1]
+            
+            // Hide territories of dead teams completely
+            const isDeadTeam = owner && !(owner as { alive: boolean }).alive
+            if (isDeadTeam) return null
+            
             const isCaptured = last && last.targetCellId === (cell as { id: number }).id && last.turn === turn && !suppressLastOverlay
             const isDefenderTeam = last && last.defenderTeamId != null && (cell as { ownerTeamId: number }).ownerTeamId === last.defenderTeamId && last.turn === turn && !suppressLastOverlay
             const isNeutral = (cell as { ownerTeamId: number }).ownerTeamId === -1 || (cell as { ownerTeamId: number }).ownerTeamId == null
@@ -383,10 +403,13 @@ export default function MapView({
                   strokeLinecap="round"
                   initial={{ opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }}
                   animate={
-                    isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam || (previewFromTeamId!=null && (owner as { id: number })?.id === previewFromTeamId)
+                    // Only show attacker team clearly when previewFromTeamId is set
+                    previewFromTeamId != null && (owner as { id: number })?.id === previewFromTeamId
                       ? { opacity: 1, filter: "blur(0px)" }
                       : previewFromTeamId != null && !isNeutral
                       ? { opacity: 0.4, filter: "blur(3px)" }
+                      : isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam
+                      ? { opacity: 1, filter: "blur(0px)" }
                       : { opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }
                   }
                   transition={{ 
@@ -518,84 +541,30 @@ export default function MapView({
             const to = storeCells.find((c) => (c as { id: number }).id === toId)
             if (!from || !to) return null
             
-            // Find the attacking team's centroid (not just the from cell)
-            const attackerTeamId = last?.attackerTeamId
-            const attackerCells = storeCells.filter((c) => (c as { ownerTeamId: number }).ownerTeamId === attackerTeamId)
+            // Attacker team calculation removed - no longer needed
             
-            // Fallback to from cell if attacker cells not found
-            let attackerCenter: [number, number]
-            if (attackerCells.length === 0) {
-              attackerCenter = (from as { centroid: [number, number] }).centroid
-            } else {
-              // Calculate attacker's center from all their cells
-              const sumX = attackerCells.reduce((sum: number, cell) => sum + (cell as { centroid: [number, number] }).centroid[0], 0)
-              const sumY = attackerCells.reduce((sum: number, cell) => sum + (cell as { centroid: [number, number] }).centroid[1], 0)
-              attackerCenter = [sumX / attackerCells.length, sumY / attackerCells.length]
-            }
+            // Attacker center calculation removed - no longer needed
             
-            const [sx, sy] = attackerCenter
+            // const [sx, sy] = attackerCenter // Removed unused variables
             
-            // Get the selected direction from rotating arrow angle, not history
-            const selectedDirection = rotatingArrowAngle != null ? 
-              (() => {
-                // Convert angle back to direction
-                const normalizedAngle = ((rotatingArrowAngle % 360) + 360) % 360
-                if (normalizedAngle >= 337.5 || normalizedAngle < 22.5) return 'E'
-                if (normalizedAngle >= 22.5 && normalizedAngle < 67.5) return 'NE'
-                if (normalizedAngle >= 67.5 && normalizedAngle < 112.5) return 'N'
-                if (normalizedAngle >= 112.5 && normalizedAngle < 157.5) return 'NW'
-                if (normalizedAngle >= 157.5 && normalizedAngle < 202.5) return 'W'
-                if (normalizedAngle >= 202.5 && normalizedAngle < 247.5) return 'SW'
-                if (normalizedAngle >= 247.5 && normalizedAngle < 292.5) return 'S'
-                if (normalizedAngle >= 292.5 && normalizedAngle < 337.5) return 'SE'
-                return 'S'
-              })() : (last?.direction || 'S')
+            // Direction calculation removed - no longer needed
             
-            // 🔍 ARROW DEBUG - Yön hesaplaması
-            const normalizedForLog = rotatingArrowAngle != null ? ((rotatingArrowAngle % 360) + 360) % 360 : null
-            console.log('🎯 ARROW DIRECTION:', {
-              angle: rotatingArrowAngle?.toFixed(1),
-              normalized: normalizedForLog?.toFixed(1),
-              direction: selectedDirection,
-              expected: '✅ Check visually'
-            })
+            // Arrow direction calculation
             
-            // Calculate direction vector based on selected direction
-            // Map arrow angle to Math.cos/sin angles
-            // In SVG: right=0°, down=90°, left=180°, up=270°
-            // But we need to map game directions to visual arrows
-            const dirAngle: Record<string, number> = {
-              E: 0,    // Right → 0°
-              SE: 45,  // Right-Down → 45°
-              S: 90,   // Down → 90°
-              SW: 135, // Left-Down → 135°
-              W: 180,  // Left → 180°
-              NW: 225, // Left-Up → 225°
-              N: 270,  // Up → 270°
-              NE: 315  // Right-Up → 315°
-            }
+            // Direction mapping removed - no longer needed
             
-            const deg = dirAngle[selectedDirection] || 90
-            // Convert to SVG coordinate system: Y-axis points down
-            const ang = (deg * Math.PI) / 180
-            const ndx = Math.cos(ang)
-            const ndy = Math.sin(ang) // SVG Y-axis points down, so this is correct
+            // const deg = dirAngle[selectedDirection] || 90 // Removed unused variable
+            // Convert to SVG coordinate system - removed unused variables
             
-            // Calculate arrow end point based on selected direction
-            const arrowLength = 80 // Fixed arrow length
-            const ex = sx + ndx * arrowLength
-            const ey = sy + ndy * arrowLength
+            // Calculate arrow end point based on selected direction - removed unused variables
             
-            const mx = (sx + ex) / 2
-            const my = (sy + ey) / 2 - 24
+            // const mx = (sx + ex) / 2
+            // const my = (sy + ey) / 2 - 24
             // attacker removed - no longer needed for arrows
             // label removed - no longer needed for arrows
             // lw and lh removed - no longer needed for arrows
 
-            // Quadratic curve control point (above midpoint)
-            const cx = mx
-            const cy = my
-            const pathD = `M ${sx} ${sy} Q ${cx} ${cy} ${ex} ${ey}`
+            // Quadratic curve control point (above midpoint) - removed unused variables
 
             // Attack arrows removed - no longer needed
             return null
@@ -624,7 +593,13 @@ export default function MapView({
         {teams.map((team) => {
           const teamId = (team as { id: number }).id
           const teamName = (team as { name?: string })?.name
+          const isAlive = (team as { alive: boolean }).alive
           const club = (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === teamName)
+          
+          // Hide logos of dead teams
+          if (!isAlive) {
+            return null
+          }
           
           // Find all cells owned by this team
           const teamCells = storeCells.filter((cell) => (cell as { ownerTeamId: number }).ownerTeamId === teamId)
@@ -819,7 +794,7 @@ export default function MapView({
           const teamCells = storeCells.filter((cell) => (cell as { ownerTeamId: number }).ownerTeamId === rotatingArrowTeamId)
           if (teamCells.length === 0) return null
           
-          // Calculate team center
+          // Calculate team center - SAME as beam calculation
           let totalX = 0, totalY = 0
           for (const cell of teamCells) {
             const cellData = cell as { id: number, centroid: [number, number] }
@@ -842,49 +817,82 @@ export default function MapView({
           
           return (
             <g key={`rotating-arrow-${rotatingArrowTeamId}`}>
-              {/* Arrow glow */}
+              {/* Glassmorphism filters */}
               <defs>
                 <filter id="arrowGlow">
-                  <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+                  <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
                   <feMerge>
                     <feMergeNode in="coloredBlur"/>
                     <feMergeNode in="SourceGraphic"/>
                   </feMerge>
                 </filter>
+                <linearGradient id="arrowGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="rgba(251, 191, 36, 0.9)" />
+                  <stop offset="50%" stopColor="rgba(245, 158, 11, 1)" />
+                  <stop offset="100%" stopColor="rgba(239, 68, 68, 0.95)" />
+                </linearGradient>
               </defs>
               
-              {/* Arrow line */}
-              <line
-                x1={centerX}
-                y1={centerY}
-                x2={endX}
-                y2={endY}
-                stroke="#fbbf24"
-                strokeWidth="6"
-                strokeLinecap="round"
-                filter="url(#arrowGlow)"
-                opacity={0.9}
-              />
+              {/* Static background - like team logo */}
+              <g>
+                {/* Glassmorphism background circle - like team logo */}
+                <circle
+                  cx={centerX}
+                  cy={centerY}
+                  r="32"
+                  fill="rgba(255,255,255,0.15)"
+                  stroke="rgba(255,255,255,0.3)"
+                  strokeWidth="3"
+                  filter="url(#arrowGlow)"
+                  opacity={0.8}
+                />
+              </g>
               
-              {/* Arrow head */}
-              <polygon
-                points={`${endX},${endY} ${endX - 12 * Math.cos(angle - 0.5)},${endY - 12 * Math.sin(angle - 0.5)} ${endX - 12 * Math.cos(angle + 0.5)},${endY - 12 * Math.sin(angle + 0.5)}`}
-                fill="#fbbf24"
-                stroke="#ffffff"
-                strokeWidth="2"
-                filter="url(#arrowGlow)"
-              />
-              
-              {/* Center circle */}
-              <circle
-                cx={centerX}
-                cy={centerY}
-                r="8"
-                fill="#fbbf24"
-                stroke="#ffffff"
-                strokeWidth="3"
-                filter="url(#arrowGlow)"
-              />
+              {/* Simple rotating arrow */}
+              <motion.g
+                initial={{ rotate: 0 }}
+                animate={{ rotate: rotatingArrowAngle + 360 * 3 }}
+                transition={{ 
+                  duration: 2,
+                  ease: "linear",
+                  repeat: 0
+                }}
+                style={{ 
+                  transformOrigin: `${centerX}px ${centerY}px`
+                }}
+              >
+                {/* Center point */}
+                <circle
+                  cx={centerX}
+                  cy={centerY}
+                  r="8"
+                  fill="rgba(251, 191, 36, 0.9)"
+                  stroke="rgba(255,255,255,0.95)"
+                  strokeWidth="2"
+                  filter="url(#arrowGlow)"
+                />
+                
+                {/* Arrow line - pointing UP from center */}
+                <line
+                  x1={centerX}
+                  y1={centerY}
+                  x2={centerX}
+                  y2={centerY - 150}
+                  stroke="url(#arrowGradient)"
+                  strokeWidth="12"
+                  strokeLinecap="round"
+                  filter="url(#arrowGlow)"
+                />
+                
+                {/* Arrow head - triangle pointing UP */}
+                <polygon
+                  points={`${centerX},${centerY - 150} ${centerX - 20},${centerY - 120} ${centerX + 20},${centerY - 120}`}
+                  fill="url(#arrowGradient)"
+                  stroke="rgba(255,255,255,0.9)"
+                  strokeWidth="4"
+                  filter="url(#arrowGlow)"
+                />
+              </motion.g>
             </g>
           )
         })()}
@@ -914,9 +922,8 @@ export default function MapView({
           let endY = startY
           
           if (rotatingArrowAngle !== null && rotatingArrowAngle !== undefined) {
-            // Convert arrow angle to beam direction
-            // Arrow angle is already in the correct coordinate system
-            const angleRad = (rotatingArrowAngle * Math.PI) / 180
+            // Convert arrow angle to beam direction - use same calculation as arrow
+            const angleRad = (rotatingArrowAngle - 90) * Math.PI / 180
             const beamLength = 300
             endX = startX + Math.cos(angleRad) * beamLength
             endY = startY + Math.sin(angleRad) * beamLength
@@ -963,8 +970,8 @@ export default function MapView({
             // Fallback: use existing beam target
             const targetCell = storeCells.find((c) => (c as { id: number }).id === beamTargetCell)
             if (targetCell) {
-              endX = targetCell.centroid[0]
-              endY = targetCell.centroid[1]
+              endX = (targetCell as any).centroid[0]
+              endY = (targetCell as any).centroid[1]
             }
           }
           
@@ -988,23 +995,13 @@ export default function MapView({
               </defs>
               
               {/* Source energy effect */}
-              <motion.circle
+              <circle
                 cx={startX}
                 cy={startY}
-                r="0"
+                r="12"
                 fill="url(#beamGradient)"
                 filter="url(#beamGlow)"
-                initial={{ r: 0, opacity: 0 }}
-                animate={{ 
-                  r: [0, 8, 12, 8, 0],
-                  opacity: [0, 0.8, 1, 0.6, 0]
-                }}
-                transition={{ 
-                  duration: 3.0, 
-                  ease: "easeOut",
-                  r: { duration: 3.0, times: [0, 0.2, 0.4, 0.7, 1] },
-                  opacity: { duration: 3.0, times: [0, 0.2, 0.4, 0.7, 1] }
-                }}
+                opacity={0.8}
               />
               
               {/* Animated beam */}
@@ -1077,24 +1074,24 @@ export default function MapView({
             </g>
           )
         })()}
+        
       </svg>
       
-      {/* Spinner Overlay */}
+      {/* Modern Spinner Overlay */}
       {showTeamSpinner && teamSpinnerProps && (
-        <div className="absolute inset-0 flex items-center justify-center z-40 bg-black/40 backdrop-blur-sm rounded-3xl p-24 shadow-2xl border border-white/30">
-          <div className="scale-[3.5]">
-            <Spinner
-              key={`overlay-team-${teamSpinnerProps.winnerIndex}-${turn}-${Date.now()}`}
-              items={teamSpinnerProps.items}
-              colors={teamSpinnerProps.colors}
-              winnerIndex={teamSpinnerProps.winnerIndex}
-              fullNames={teamSpinnerProps.fullNames}
-              onDone={teamSpinnerProps.onDone}
-            />
-          </div>
-        </div>
+        <ModernSpinner
+          key={`spinner-${teamSpinnerProps.winnerIndex}`}
+          items={teamSpinnerProps.items}
+          colors={teamSpinnerProps.colors}
+          winnerIndex={teamSpinnerProps.winnerIndex ?? 0}
+          fullNames={teamSpinnerProps.fullNames ?? []}
+          onDone={teamSpinnerProps.onDone ?? (() => {})}
+        />
       )}
       
+      </div> {/* Glassmorphism Container */}
+      
+      {/* Direction Selection Buttons moved to right panel */}
     </div>
   )
 }

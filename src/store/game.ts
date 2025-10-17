@@ -124,7 +124,7 @@ export const DIRECTIONS: Direction[] = [
 
 export const useGameStore = create<GameState>((set, get) => ({
   selectedCountry: "Turkey" as CountryKey,
-  numTeams: 5,
+  numTeams: 8,
   mapColoring: "striped" as "solid" | "striped",
   seed: "demo",
   turn: 0,
@@ -190,9 +190,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       // Now assign capitals: each team's capital is the cell with same ID
       const assignedTeams = teams.map((t) => {
         const capitalCellId = t.id
-        console.log(
-          `Team ${t.name} (ID: ${t.id}) assigned capital cell: ${capitalCellId}`
-        )
         return { ...t, capitalCellId }
       })
 
@@ -500,12 +497,42 @@ export const useGameStore = create<GameState>((set, get) => ({
       const roll = rng()
       const attackerWon = roll < p
 
-      // Loser loses ALL territories
+      // Loser loses ALL territories - merge with winner
       const winnerId = attackerWon ? attackerTeamId : (defenderTeamId as number)
       const loserId = attackerWon ? (defenderTeamId as number) : attackerTeamId
+      
+      // Merge territories: loser's territories become winner's
       const newCells = state.cells.map((cell) =>
         cell.ownerTeamId === loserId ? { ...cell, ownerTeamId: winnerId } : cell
       )
+      
+      // Update winner's capital to be in the center of their merged territory
+      const updateWinnerCapital = (teamId: number) => {
+        const teamCells = newCells.filter(cell => cell.ownerTeamId === teamId)
+        if (teamCells.length === 0) return null
+        
+        // Calculate center of all team cells
+        const centerX = teamCells.reduce((sum, cell) => sum + cell.centroid[0], 0) / teamCells.length
+        const centerY = teamCells.reduce((sum, cell) => sum + cell.centroid[1], 0) / teamCells.length
+        
+        // Find the cell closest to the center
+        let closestCell = teamCells[0]
+        let minDistance = Infinity
+        
+        for (const cell of teamCells) {
+          const dx = cell.centroid[0] - centerX
+          const dy = cell.centroid[1] - centerY
+          const distance = Math.sqrt(dx * dx + dy * dy)
+          if (distance < minDistance) {
+            minDistance = distance
+            closestCell = cell
+          }
+        }
+        
+        return closestCell.id
+      }
+      
+      const newWinnerCapital = updateWinnerCapital(winnerId)
 
       const ownerCounts = new Map<number, number>()
       for (const c of newCells)
@@ -519,6 +546,13 @@ export const useGameStore = create<GameState>((set, get) => ({
         let overall = t.overall ?? 75
         let form = t.form ?? 1
         let capitalPenaltyUntilTurn = t.capitalPenaltyUntilTurn
+        let capitalCellId = t.capitalCellId
+        
+        // Update winner's capital to center of merged territory
+        if (t.id === winnerId && newWinnerCapital) {
+          capitalCellId = newWinnerCapital
+        }
+        
         if (
           attackerWon &&
           t.id === defenderTeamId &&
@@ -554,12 +588,17 @@ export const useGameStore = create<GameState>((set, get) => ({
             form = clampForm(form + BALANCE.form.win)
           }
         }
+        
+        // Check if team is alive (has territories)
+        const isAlive = (ownerCounts.get(t.id) || 0) > 0
+        
         return {
           ...t,
           overall,
           form,
           capitalPenaltyUntilTurn,
-          alive: (ownerCounts.get(t.id) || 0) > 0
+          capitalCellId,
+          alive: isAlive
         }
       })
 
