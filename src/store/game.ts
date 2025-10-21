@@ -79,10 +79,19 @@ interface GameState {
     attackerTeamId: number,
     direction: Direction
   ) => { fromCellId: number; toCellId: number } | null
+  resolveTargetByAngle?: (
+    attackerTeamId: number,
+    angleDeg: number
+  ) => { fromCellId: number; toCellId: number } | null
   applyAttack: (
     attackerTeamId: number,
     direction: Direction
   ) => { success: boolean; targetCellId?: number }
+  applyAttackToCell: (
+    attackerTeamId: number,
+    fromCellId: number,
+    toCellId: number
+  ) => { success: boolean }
   playAutoTurn: () => { success: boolean }
   undo: () => void
   resetToInitial: () => void
@@ -373,6 +382,100 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
     return { fromCellId: bestFromId as number, toCellId: bestToId as number }
   },
+  resolveTargetByAngle: (attackerTeamId: number, angleDeg: number) => {
+    const state = get()
+    // Screen coordinates: x right, y down. Build direction vector accordingly
+    const ang = (angleDeg * Math.PI) / 180
+    const ux = Math.cos(ang)
+    const uy = Math.sin(ang)
+
+    const attackerCells = state.cells.filter((c) => c.ownerTeamId === attackerTeamId)
+    if (attackerCells.length === 0) return null
+
+    const sum = attackerCells.reduce<[number, number]>((acc, c) => [acc[0] + c.centroid[0], acc[1] + c.centroid[1]], [0, 0])
+    const cx = sum[0] / attackerCells.length
+    const cy = sum[1] / attackerCells.length
+
+    type EdgeInfo = { cellId: number; owner: number; a: [number, number]; b: [number, number] }
+    const edgeMap = new Map<string, EdgeInfo>()
+    const normKey = (p1: [number, number], p2: [number, number]) => {
+      const k1 = `${p1[0]},${p1[1]}`
+      const k2 = `${p2[0]},${p2[1]}`
+      return k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`
+    }
+    const boundaries: { a: [number, number]; b: [number, number]; cellA: number; ownerA: number; cellB: number; ownerB: number }[] = []
+    for (const cell of state.cells) {
+      const poly = cell.polygon
+      if (!poly) continue
+      for (let i = 0; i < poly.length; i++) {
+        const a = poly[i] as [number, number]
+        const b = poly[(i + 1) % poly.length] as [number, number]
+        const key = normKey(a, b)
+        const ex = edgeMap.get(key)
+        if (!ex) {
+          edgeMap.set(key, { cellId: cell.id, owner: cell.ownerTeamId, a, b })
+        } else if (ex.owner !== cell.ownerTeamId) {
+          boundaries.push({ a: ex.a, b: ex.b, cellA: ex.cellId, ownerA: ex.owner, cellB: cell.id, ownerB: cell.ownerTeamId })
+        }
+      }
+    }
+    const isAttackerEdge = (bd: { ownerA: number; ownerB: number }) => (bd.ownerA === attackerTeamId) !== (bd.ownerB === attackerTeamId)
+    const cross = (ax: number, ay: number, bx: number, by: number) => ax * by - ay * bx
+    const eps = 1e-9
+    let bestT = Infinity
+    let best: { fromCellId: number; toCellId: number } | null = null
+    for (const bd of boundaries) {
+      if (!isAttackerEdge(bd)) continue
+      const ax = bd.a[0], ay = bd.a[1]
+      const bx = bd.b[0], by = bd.b[1]
+      const sx = bx - ax, sy = by - ay
+      const denom = cross(ux, uy, sx, sy)
+      if (Math.abs(denom) < eps) continue
+      const acx = ax - cx, acy = ay - cy
+      const t = cross(acx, acy, sx, sy) / denom
+      const s = cross(acx, acy, ux, uy) / denom
+      if (t >= 0 && s >= 0 && s <= 1) {
+        if (t < bestT) {
+          bestT = t
+          const fromCellId = bd.ownerA === attackerTeamId ? bd.cellA : bd.cellB
+          const toCellId = bd.ownerA === attackerTeamId ? bd.cellB : bd.cellA
+          best = { fromCellId, toCellId }
+        }
+      }
+    }
+    if (best) return best
+
+    // Fallback: neighbor-based within angular window
+    const toDegScreen = (dx: number, dy: number) => (Math.atan2(dy, dx) * 180) / Math.PI
+    const tolerance = 20
+    let bestAlong = Infinity
+    let bestPerp = Infinity
+    let bestFromId: number | null = null
+    let bestToId: number | null = null
+    for (const c of attackerCells) {
+      for (const nIdx of c.neighbors || []) {
+        const nb = state.cells[nIdx]
+        if (!nb || nb.ownerTeamId === attackerTeamId) continue
+        const dx = nb.centroid[0] - cx
+        const dy = nb.centroid[1] - cy
+        const along = dx * ux + dy * uy
+        if (along <= 0) continue
+        const aDeg = toDegScreen(dx, dy)
+        let diff = Math.abs(((aDeg - angleDeg + 540) % 360) - 180)
+        diff = Math.abs(diff)
+        if (diff > tolerance) continue
+        const perp = Math.abs(dx * -uy + dy * ux)
+        if (along < bestAlong - 1e-6 || (Math.abs(along - bestAlong) < 1e-6 && perp < bestPerp)) {
+          bestAlong = along
+          bestPerp = perp
+          bestFromId = c.id
+          bestToId = nb.id
+        }
+      }
+    }
+    if (bestToId == null) return null
+    return { fromCellId: bestFromId as number, toCellId: bestToId as number }
+  },
   applyAttack: (attackerTeamId: number, direction: Direction) => {
     const target = get().resolveTarget(attackerTeamId, direction)
     if (!target) {
@@ -659,6 +762,172 @@ export const useGameStore = create<GameState>((set, get) => ({
           targetCellId: (target as { toCellId: number }).toCellId
         }
       : { success: false }
+  },
+  applyAttackToCell: (attackerTeamId: number, fromCellId: number, toCellId: number) => {
+    set((state) => {
+      const snapshot = {
+        teams: JSON.parse(JSON.stringify(state.teams)),
+        cells: JSON.parse(JSON.stringify(state.cells)),
+        turn: state.turn,
+        history: JSON.parse(JSON.stringify(state.history))
+      }
+
+      const defenderTeamId = state.cells.find((c) => c.id === toCellId)?.ownerTeamId
+
+      // Neutral
+      if (defenderTeamId === -1) {
+        const rng = createRng(`${state.seed}:neutral:${state.turn}:${attackerTeamId}:${toCellId}`)
+        const roll = rng()
+        const success = roll < BALANCE.neutrals.captureProbability
+        if (!success) return state
+        const newCells = state.cells.map((cell) =>
+          cell.id === toCellId ? { ...cell, ownerTeamId: attackerTeamId } : cell
+        )
+        const ownerCounts = new Map<number, number>()
+        for (const c of newCells) ownerCounts.set(c.ownerTeamId, (ownerCounts.get(c.ownerTeamId) || 0) + 1)
+        const newTeams = state.teams.map((t) => ({ ...t, alive: (ownerCounts.get(t.id) || 0) > 0 }))
+        const historyItem: HistoryItem = {
+          turn: state.turn + 1,
+          attackerTeamId,
+          defenderTeamId: -1,
+          targetCellId: toCellId,
+          direction: 'N', // not relevant here
+          timestamp: Date.now(),
+          fromCellId,
+          attackerWon: true,
+          p: BALANCE.neutrals.captureProbability
+        }
+        return {
+          ...state,
+          cells: newCells,
+          teams: newTeams,
+          history: [...state.history, historyItem],
+          turn: state.turn + 1,
+          snapshots: [...state.snapshots, snapshot],
+          previewFromCellId: undefined,
+          previewToCellId: undefined
+        }
+      }
+
+      const attackerTeam = state.teams.find((t) => t.id === attackerTeamId)
+      const defenderTeam = state.teams.find((t) => t.id === defenderTeamId)
+
+      const support = (teamId: number, cellId: number) => {
+        const cell = state.cells.find((c) => c.id === cellId)
+        if (!cell || !cell.neighbors) return 0
+        const count = cell.neighbors.reduce(
+          (acc, n) => acc + (state.cells[n]?.ownerTeamId === teamId ? 1 : 0),
+          0
+        )
+        return count * BALANCE.neighborSupportWeight
+      }
+
+      const baseA = attackerTeam?.overall ?? 75
+      const baseB = defenderTeam?.overall ?? 75
+      const formA = (attackerTeam?.form ?? 1) * (state.turn < (attackerTeam?.capitalPenaltyUntilTurn ?? 0) ? 1 - BALANCE.capital.penaltyPower / 100 : 1)
+      const formB = (defenderTeam?.form ?? 1) * (state.turn < (defenderTeam?.capitalPenaltyUntilTurn ?? 0) ? 1 - BALANCE.capital.penaltyPower / 100 : 1)
+      const powerA = baseA * formA + support(attackerTeamId, fromCellId)
+      const powerB = baseB * formB + support(defenderTeamId as number, toCellId)
+      const x = (powerA - powerB) / BALANCE.k + BALANCE.attackerAdvantageX
+      const logistic = (v: number) => 1 / (1 + Math.exp(-v))
+      const p = logistic(x)
+
+      const rng = createRng(`${state.seed}:match:${state.turn}:${attackerTeamId}:${toCellId}`)
+      const roll = rng()
+      const attackerWon = roll < p
+
+      const winnerId = attackerWon ? attackerTeamId : (defenderTeamId as number)
+      const loserId = attackerWon ? (defenderTeamId as number) : attackerTeamId
+
+      const newCells = state.cells.map((cell) =>
+        cell.ownerTeamId === loserId ? { ...cell, ownerTeamId: winnerId } : cell
+      )
+
+      const updateWinnerCapital = (teamId: number) => {
+        const teamCells = newCells.filter(cell => cell.ownerTeamId === teamId)
+        if (teamCells.length === 0) return null
+        const centerX = teamCells.reduce((sum, cell) => sum + cell.centroid[0], 0) / teamCells.length
+        const centerY = teamCells.reduce((sum, cell) => sum + cell.centroid[1], 0) / teamCells.length
+        let closestCell = teamCells[0]
+        let minDistance = Infinity
+        for (const cell of teamCells) {
+          const dx = cell.centroid[0] - centerX
+          const dy = cell.centroid[1] - centerY
+          const distance = Math.sqrt(dx * dx + dy * dy)
+          if (distance < minDistance) { minDistance = distance; closestCell = cell }
+        }
+        return closestCell.id
+      }
+      const newWinnerCapital = updateWinnerCapital(winnerId)
+
+      const ownerCounts = new Map<number, number>()
+      for (const c of newCells) ownerCounts.set(c.ownerTeamId, (ownerCounts.get(c.ownerTeamId) || 0) + 1)
+      const clampForm = (v: number) => Math.max(BALANCE.form.min, Math.min(BALANCE.form.max, v))
+      const newTeams = state.teams.map((t) => {
+        let overall = t.overall ?? 75
+        let form = t.form ?? 1
+        let capitalPenaltyUntilTurn = t.capitalPenaltyUntilTurn
+        let capitalCellId = t.capitalCellId
+        if (t.id === winnerId && newWinnerCapital) {
+          capitalCellId = newWinnerCapital
+        }
+        if (attackerWon && t.id === defenderTeamId && t.capitalCellId === toCellId) {
+          capitalPenaltyUntilTurn = state.turn + 1 + BALANCE.capital.penaltyTurns
+        }
+        if (!attackerWon && t.id === attackerTeamId && t.capitalCellId === fromCellId) {
+          capitalPenaltyUntilTurn = state.turn + 1 + BALANCE.capital.penaltyTurns
+        }
+        if (attackerWon) {
+          if (t.id === attackerTeamId) { overall = Math.min(99, overall + 1); form = clampForm(form + BALANCE.form.win) }
+          if (t.id === defenderTeamId) { overall = Math.max(40, overall - 1); form = clampForm(form + BALANCE.form.loss) }
+        } else {
+          if (t.id === attackerTeamId) { overall = Math.max(40, overall - 1); form = clampForm(form + BALANCE.form.loss) }
+          if (t.id === defenderTeamId) { overall = Math.min(99, overall + 1); form = clampForm(form + BALANCE.form.win) }
+        }
+        const isAlive = (ownerCounts.get(t.id) || 0) > 0
+        return { ...t, overall, form, capitalPenaltyUntilTurn, capitalCellId, alive: isAlive }
+      })
+
+      const capturedCapital = attackerWon && newTeams.some((t) => t.id === defenderTeamId && (t.capitalPenaltyUntilTurn ?? 0) > state.turn + 1)
+      const historyItem: HistoryItem = {
+        turn: state.turn + 1,
+        attackerTeamId,
+        defenderTeamId,
+        targetCellId: toCellId,
+        direction: 'N',
+        timestamp: Date.now(),
+        fromCellId,
+        attackerWon,
+        p,
+        capturedCapital
+      }
+      const nextState = {
+        ...state,
+        cells: newCells,
+        teams: newTeams,
+        history: [...state.history, historyItem],
+        turn: state.turn + 1,
+        snapshots: [...state.snapshots, snapshot],
+        previewFromCellId: undefined,
+        previewToCellId: undefined
+      }
+      try {
+        localStorage.setItem("fi_game_v1", JSON.stringify({
+          selectedCountry: nextState.selectedCountry,
+          numTeams: nextState.numTeams,
+          mapColoring: nextState.mapColoring,
+          seed: nextState.seed,
+          turn: nextState.turn,
+          teams: nextState.teams,
+          cells: nextState.cells,
+          history: nextState.history
+        }))
+      } catch (error) {
+        console.error('Error in applyAttackToCell:', error)
+      }
+      return nextState
+    })
+    return { success: true }
   },
   playAutoTurn: () => {
     const success = false

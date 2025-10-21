@@ -40,11 +40,15 @@ interface MapViewProps {
   }
   uiStep?: string
   cells?: any[]
+  attackedTeam?: string | null
+  attackedTeamId?: number | null
 }
 
 export default function MapView({
   showTeamSpinner = false,
-  teamSpinnerProps
+  teamSpinnerProps,
+  attackedTeam: _attackedTeam = null,
+  attackedTeamId = null
 }: MapViewProps) {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
@@ -70,6 +74,35 @@ export default function MapView({
   // overlay suppression flag read at use-time via getState() to avoid re-render triggers
   const [size, setSize] = useState<{ w: number; h: number }>({ w: 900, h: 600 })
   const initSigRef = useRef<string | null>(null)
+  
+  // Arrow rotation animation state
+  const [currentRotation, setCurrentRotation] = useState(0)
+  
+  // Animate arrow rotation
+  useEffect(() => {
+    if (rotatingArrowAngle == null) return
+    
+    const startTime = Date.now()
+    const duration = 2000 // 2 seconds
+    const targetRotation = rotatingArrowAngle + 360 * 3
+    
+    const animate = () => {
+      const elapsed = Date.now() - startTime
+      const progress = Math.min(elapsed / duration, 1)
+      
+      // Ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3)
+      const rotation = targetRotation * eased
+      
+      setCurrentRotation(rotation)
+      
+      if (progress < 1) {
+        requestAnimationFrame(animate)
+      }
+    }
+    
+    requestAnimationFrame(animate)
+  }, [rotatingArrowAngle])
 
   useEffect(() => {
     const onResize = () => {
@@ -373,6 +406,8 @@ export default function MapView({
             const isNeutral = (cell as { ownerTeamId: number }).ownerTeamId === -1 || (cell as { ownerTeamId: number }).ownerTeamId == null
             const isPreviewFrom = previewFrom === (cell as { id: number }).id
             const isPreviewTo = previewTo === (cell as { id: number }).id
+            // Saldırılan takım vurgusu - sadece attackedTeamId kullan, previewTo ile çakışmasın
+            const isAttackedTeam = attackedTeamId != null && owner && (owner as { id: number }).id === attackedTeamId
             const ownerId = owner ? (owner as { id: number }).id : 'neutral'
             // lookup dual colors
             const club = owner ? (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (owner as { name: string }).name) : undefined
@@ -392,14 +427,17 @@ export default function MapView({
                       ? `url(#team-stripe-${(owner as { id: number })?.id})`
                       : ((owner as { color?: string })?.color || "#ddd")
                   }
-                  stroke="none"
-                  strokeWidth={0}
+                  stroke={isAttackedTeam ? "#ff6b6b" : "none"}
+                  strokeWidth={isAttackedTeam ? 3 : 0}
                   strokeOpacity={0.8}
                   strokeLinejoin="round"
                   strokeLinecap="round"
                   initial={{ opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }}
                   animate={
-                    // Only show attacker team clearly when previewFromTeamId is set
+                    // Saldırılan takımın hücrelerini netleştir
+                    isAttackedTeam
+                      ? { opacity: 1, filter: "blur(0px)", scale: 1.05 }
+                      : // Only show attacker team clearly when previewFromTeamId is set
                     previewFromTeamId != null && (owner as { id: number })?.id === previewFromTeamId
                       ? { opacity: 1, filter: "blur(0px)" }
                       : previewFromTeamId != null && !isNeutral
@@ -410,7 +448,8 @@ export default function MapView({
                   }
                   transition={{ 
                     opacity: { duration: 0.6, ease: "easeInOut" },
-                    filter: { duration: 0.8, ease: "easeInOut" }
+                    filter: { duration: 0.8, ease: "easeInOut" },
+                    scale: { duration: 0.8, ease: "easeInOut" }
                   }}
                 >
                   <title>{`${(owner as { name?: string })?.name ?? (isNeutral ? 'Neutral' : 'Team')} • cell ${(cell as { id: number }).id}`}</title>
@@ -717,17 +756,19 @@ export default function MapView({
           
           
           return (
-            <g key={`logo-${teamId}-${turn}`} transform={`translate(${centroid[0]-32}, ${centroid[1]-32})`}>
+            <g key={`logo-${teamId}-${turn}`} transform={`translate(${centroid[0]-32}, ${centroid[1]-32})`} data-team-id={teamId}>
               <title>{teamName}</title>
               <foreignObject width="64" height="64" x="0" y="0">
                 <div 
                   style={{
                     width: '64px',
                     height: '64px',
-                    borderRadius: '50%',
-                    background: `linear-gradient(135deg, ${club?.colors?.[0] || '#666'}, ${club?.colors?.[1] || '#999'})`,
-                    border: '3px solid #fff',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                    borderRadius: '18px',
+                    background: `linear-gradient(145deg, rgba(255,255,255,0.25), rgba(255,255,255,0.05))`,
+                    border: '1px solid rgba(255,255,255,0.4)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6), 0 8px 24px rgba(0,0,0,0.25)',
+                    backdropFilter: 'blur(10px)',
+                    WebkitBackdropFilter: 'blur(10px)',
                     display: 'flex',
                     flexDirection: 'column',
                     alignItems: 'center',
@@ -737,44 +778,26 @@ export default function MapView({
                     overflow: 'hidden'
                   }}
                 >
-                  {/* Inner circle */}
+                  {/* Inner tint matching team colors */}
                   <div 
                     style={{
-                      width: '48px',
-                      height: '48px',
-                      borderRadius: '50%',
-                      background: club?.colors?.[1] || '#999',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      border: '2px solid #fff'
+                      position: 'absolute',
+                      inset: 0,
+                      background: `linear-gradient(145deg, ${(club?.colors?.[0] || '#666')}80, ${(club?.colors?.[1] || '#999')}50)`,
+                      opacity: 0.85,
+                      mixBlendMode: 'multiply'
                     }}
                   >
-                    {/* Team abbreviation */}
-                    <div 
-                      style={{
-                        fontSize: '12px',
-                        fontWeight: 'bold',
-                        color: '#fff',
-                        textShadow: '1px 1px 2px rgba(0,0,0,0.7)',
-                        lineHeight: '1'
-                      }}
-                    >
-                      {club?.abbreviation || (teamName || 'TM').slice(0, 2).toUpperCase()}
-                    </div>
-                    {/* Founded year */}
-                    <div 
-                      style={{
-                        fontSize: '8px',
-                        color: '#fff',
-                        textShadow: '1px 1px 2px rgba(0,0,0,0.7)',
-                        lineHeight: '1',
-                        marginTop: '2px'
-                      }}
-                    >
-                      {club?.founded || '1900'}
-                    </div>
+                    {/* content overlay */}
+                  </div>
+                  <div style={{position:'relative', zIndex:1, display:'flex', flexDirection:'column', alignItems:'center'}}>
+                    <div style={{
+                      fontSize:'12px', fontWeight:900,
+                      color:'#fff', textShadow:'0 2px 8px rgba(0,0,0,0.5)'
+                    }}>{club?.abbreviation || (teamName || 'TM').slice(0,2).toUpperCase()}</div>
+                    <div style={{
+                      fontSize:'8px', color:'#fff', opacity:0.9
+                    }}>{club?.founded || '1900'}</div>
                   </div>
                 </div>
               </foreignObject>
@@ -790,107 +813,184 @@ export default function MapView({
           const teamCells = storeCells.filter((cell) => (cell as { ownerTeamId: number }).ownerTeamId === rotatingArrowTeamId)
           if (teamCells.length === 0) return null
           
-          // Calculate team center - SAME as beam calculation
-          let totalX = 0, totalY = 0
-          for (const cell of teamCells) {
-            const cellData = cell as { id: number, centroid: [number, number] }
-            const voronoiPoly = voronoiPolys[cellData.id]
-            if (voronoiPoly && voronoiPoly.length > 0) {
-              const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
-              const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
-              totalX += sumX / voronoiPoly.length
-              totalY += sumY / voronoiPoly.length
-            }
-          }
-          const centerX = totalX / teamCells.length
-          const centerY = totalY / teamCells.length
+          // Use the SAME calculation as team logo positioning
+          const teamName = (arrowTeam as { name?: string })?.name
           
-          // Arrow positioning calculated in the arrow rendering below
+          // Find the best position for logo within team territories (SAME as team logo)
+          const findBestLogoPosition = (cells: unknown[]): [number, number] => {
+            if (cells.length === 1) {
+              const cell = cells[0] as { id: number }
+              const voronoiPoly = voronoiPolys[cell.id]
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+                return [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
+              }
+              return (cell as unknown as { centroid: [number, number] }).centroid
+            }
+            
+            const cellsWithData = cells as { id: number }[]
+            let totalX = 0, totalY = 0, validPolys = 0
+            
+            for (const cell of cellsWithData) {
+              const voronoiPoly = voronoiPolys[cell.id]
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+                totalX += sumX / voronoiPoly.length
+                totalY += sumY / voronoiPoly.length
+                validPolys++
+              }
+            }
+            
+            if (validPolys === 0) {
+              return (cellsWithData[0] as unknown as { centroid: [number, number] }).centroid
+            }
+            
+            const geometricCenter: [number, number] = [totalX / validPolys, totalY / validPolys]
+            let bestCell = cellsWithData[0]
+            let minDistance = Infinity
+            
+            for (const cell of cellsWithData) {
+              const voronoiPoly = voronoiPolys[cell.id]
+              if (voronoiPoly && voronoiPoly.length > 0) {
+                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+                const centroid = [sumX / voronoiPoly.length, sumY / voronoiPoly.length]
+                const dx = centroid[0] - geometricCenter[0]
+                const dy = centroid[1] - geometricCenter[1]
+                const distance = Math.sqrt(dx * dx + dy * dy)
+                if (distance < minDistance) {
+                  minDistance = distance
+                  bestCell = cell
+                }
+              }
+            }
+            
+            const bestVoronoiPoly = voronoiPolys[bestCell.id]
+            if (bestVoronoiPoly && bestVoronoiPoly.length > 0) {
+              const sumX = bestVoronoiPoly.reduce((sum, point) => sum + point[0], 0)
+              const sumY = bestVoronoiPoly.reduce((sum, point) => sum + point[1], 0)
+              return [sumX / bestVoronoiPoly.length, sumY / bestVoronoiPoly.length]
+            }
+            
+            return (bestCell as unknown as { centroid: [number, number] }).centroid
+          }
+          
+          // Use the EXACT SAME coordinates as the team logo
+          // Team logo uses: centroid[0] and centroid[1]
+          const logoPosition = findBestLogoPosition(teamCells)
+          let centerX = logoPosition[0]
+          let centerY = logoPosition[1]
+          
+          // Special adjustment for Başakşehir (SAME as team logo)
+          if (teamName === 'Başakşehir') {
+            const geometricCenter = {
+              x: teamCells.reduce((sum: number, cell: unknown) => sum + (cell as { centroid: [number, number] }).centroid[0], 0) / teamCells.length,
+              y: teamCells.reduce((sum: number, cell: unknown) => sum + (cell as { centroid: [number, number] }).centroid[1], 0) / teamCells.length
+            }
+            
+            let bestCell = teamCells[0] as { id: number, centroid: [number, number] }
+            let minDistance = Infinity
+            
+            for (const cell of teamCells) {
+              const cellData = cell as { id: number, centroid: [number, number] }
+              const distance = Math.sqrt(
+                Math.pow(cellData.centroid[0] - geometricCenter.x, 2) + 
+                Math.pow(cellData.centroid[1] - geometricCenter.y, 2)
+              )
+              if (distance < minDistance) {
+                minDistance = distance
+                bestCell = cellData
+              }
+            }
+            
+            centerX = bestCell.centroid[0]
+            centerY = bestCell.centroid[1]
+          }
+          
           
           return (
             <g key={`rotating-arrow-${rotatingArrowTeamId}`}>
-              {/* Glassmorphism filters */}
+              {/* Enhanced filters for better visual effects */}
               <defs>
-                <filter id="arrowGlow">
-                  <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+                <filter id="arrowGlow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
                   <feMerge>
                     <feMergeNode in="coloredBlur"/>
                     <feMergeNode in="SourceGraphic"/>
                   </feMerge>
                 </filter>
+                <filter id="arrowShadow" x="-50%" y="-50%" width="200%" height="200%">
+                  <feDropShadow dx="2" dy="2" stdDeviation="3" floodColor="rgba(0,0,0,0.3)"/>
+                </filter>
                 <linearGradient id="arrowGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="rgba(251, 191, 36, 0.9)" />
+                  <stop offset="0%" stopColor="rgba(251, 191, 36, 1)" />
                   <stop offset="50%" stopColor="rgba(245, 158, 11, 1)" />
-                  <stop offset="100%" stopColor="rgba(239, 68, 68, 0.95)" />
+                  <stop offset="100%" stopColor="rgba(239, 68, 68, 1)" />
                 </linearGradient>
+                <radialGradient id="centerGlow" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="rgba(255, 255, 255, 0.8)" />
+                  <stop offset="70%" stopColor="rgba(251, 191, 36, 0.9)" />
+                  <stop offset="100%" stopColor="rgba(245, 158, 11, 0.7)" />
+                </radialGradient>
               </defs>
               
-              {/* Static background - like team logo */}
-              <g>
-                {/* Glassmorphism background circle - like team logo */}
-                <circle
-                  cx={centerX}
-                  cy={centerY}
-                  r="32"
-                  fill="rgba(255,255,255,0.15)"
-                  stroke="rgba(255,255,255,0.3)"
-                  strokeWidth="3"
-                  filter="url(#arrowGlow)"
-                  opacity={0.8}
-                />
-              </g>
-              
-              {/* Simple rotating arrow */}
-              <motion.g
-                initial={{ rotate: 0 }}
-                animate={{ rotate: rotatingArrowAngle + 360 * 3 }}
-                transition={{ 
-                  duration: 2,
-                  ease: "linear",
-                  repeat: 0
-                }}
-                style={{ 
-                  transformOrigin: `${centerX}px ${centerY}px`
-                }}
-              >
-                {/* Center point */}
-                <circle
-                  cx={centerX}
-                  cy={centerY}
-                  r="8"
-                  fill="rgba(251, 191, 36, 0.9)"
-                  stroke="rgba(255,255,255,0.95)"
-                  strokeWidth="2"
-                  filter="url(#arrowGlow)"
-                />
-                
-                {/* Arrow line - pointing UP from center */}
-                <line
-                  x1={centerX}
-                  y1={centerY}
-                  x2={centerX}
-                  y2={centerY - 150}
-                  stroke="url(#arrowGradient)"
-                  strokeWidth="12"
-                  strokeLinecap="round"
-                  filter="url(#arrowGlow)"
-                />
-                
-                {/* Arrow head - triangle pointing UP */}
-                <polygon
-                  points={`${centerX},${centerY - 150} ${centerX - 20},${centerY - 120} ${centerX + 20},${centerY - 120}`}
-                  fill="url(#arrowGradient)"
-                  stroke="rgba(255,255,255,0.9)"
-                  strokeWidth="4"
-                  filter="url(#arrowGlow)"
-                />
-              </motion.g>
+              {/* Rotating arrow group - centered on team icon */}
+              <g transform={`rotate(${currentRotation}, ${centerX}, ${centerY})`}>
+                  {/* Arrow shaft - longer and more prominent */}
+                  <line
+                    x1={centerX}
+                    y1={centerY}
+                    x2={centerX}
+                    y2={centerY - 120}
+                    stroke="url(#arrowGradient)"
+                    strokeWidth="16"
+                    strokeLinecap="round"
+                    filter="url(#arrowGlow)"
+                  />
+                  
+                  {/* Arrow head - larger and more detailed */}
+                  <polygon
+                    points={`${centerX},${centerY - 120} ${centerX - 25},${centerY - 90} ${centerX + 25},${centerY - 90}`}
+                    fill="url(#arrowGradient)"
+                    stroke="rgba(255,255,255,0.9)"
+                    strokeWidth="3"
+                    filter="url(#arrowGlow)"
+                  />
+                  
+                  {/* Center pivot point - enhanced */}
+                  <circle
+                    cx={centerX}
+                    cy={centerY}
+                    r="12"
+                    fill="url(#centerGlow)"
+                    stroke="rgba(255,255,255,0.95)"
+                    strokeWidth="3"
+                    filter="url(#arrowGlow)"
+                  />
+                  
+                  {/* Inner center dot */}
+                  <circle
+                    cx={centerX}
+                    cy={centerY}
+                    r="6"
+                    fill="rgba(255,255,255,0.9)"
+                    filter="url(#arrowShadow)"
+                  />
+                  
+                  {/* Direction indicator lines */}
+                  <g stroke="rgba(255,255,255,0.6)" strokeWidth="2" fill="none">
+                    <line x1={centerX - 8} y1={centerY - 8} x2={centerX + 8} y2={centerY + 8} />
+                    <line x1={centerX + 8} y1={centerY - 8} x2={centerX - 8} y2={centerY + 8} />
+                  </g>
+                </g>
             </g>
           )
         })()}
         
         {/* Energy Beam to Target */}
-        {beamActive && beamTargetCell != null && rotatingArrowTeamId != null && (() => {
+        {beamActive && rotatingArrowTeamId != null && rotatingArrowAngle != null && (() => {
           const teamCells = storeCells.filter((cell) => (cell as { ownerTeamId: number }).ownerTeamId === rotatingArrowTeamId)
           if (teamCells.length === 0) return null
           
@@ -915,7 +1015,7 @@ export default function MapView({
           
           if (rotatingArrowAngle !== null && rotatingArrowAngle !== undefined) {
             // Convert arrow angle to beam direction - use same calculation as arrow
-            const angleRad = (rotatingArrowAngle - 90) * Math.PI / 180
+            const angleRad = (rotatingArrowAngle! - 90) * Math.PI / 180
             const beamLength = 300
             endX = startX + Math.cos(angleRad) * beamLength
             endY = startY + Math.sin(angleRad) * beamLength
@@ -947,16 +1047,44 @@ export default function MapView({
               }
             }
             
-            // Update beam target if we found a hit
-            if (closestHit && beamTargetCell !== closestHit.id) {
-              // Defer state update to avoid setState during render
-              setTimeout(() => {
-                useGameStore.getState().setBeam?.(true, closestHit.id)
-              }, 0)
-              
-              // Update beam endpoint to hit the target
-              endX = closestHit.centroid[0]
-              endY = closestHit.centroid[1]
+            // If we found a hit, compute intersection with the target cell boundary
+            if (closestHit) {
+              const poly = voronoiPolys[closestHit.id]
+              if (poly && poly.length > 1) {
+                const dirX = beamDir[0]
+                const dirY = beamDir[1]
+                const eps = 1e-6
+                let bestT = Infinity
+                let hitX = endX
+                let hitY = endY
+                for (let i = 0; i < poly.length; i++) {
+                  const p1 = poly[i]
+                  const p2 = poly[(i + 1) % poly.length]
+                  const sx = p2[0] - p1[0]
+                  const sy = p2[1] - p1[1]
+                  const denom = dirX * sy - dirY * sx
+                  if (Math.abs(denom) < eps) continue
+                  const rx = p1[0] - startX
+                  const ry = p1[1] - startY
+                  const t = (rx * sy - ry * sx) / denom
+                  const u = (rx * dirY - ry * dirX) / denom
+                  if (t >= 0 && u >= 0 && u <= 1) {
+                    if (t < bestT) {
+                      bestT = t
+                      hitX = startX + dirX * t
+                      hitY = startY + dirY * t
+                    }
+                  }
+                }
+                if (bestT !== Infinity) {
+                  endX = hitX
+                  endY = hitY
+                } else {
+                  // fallback to centroid if boundary intersection fails
+                  endX = closestHit.centroid[0]
+                  endY = closestHit.centroid[1]
+                }
+              }
             }
           } else if (beamTargetCell != null) {
             // Fallback: use existing beam target

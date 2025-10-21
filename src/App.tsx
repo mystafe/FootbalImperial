@@ -6,6 +6,7 @@ import { createRng, weightedChoice } from "./lib/random"
 import { playCapture, playClick } from "./lib/sound"
 import { AnimatePresence, motion } from "framer-motion"
 import { loadConfig, saveConfig, type GameConfig } from "./config/game"
+import { COUNTRY_CLUBS } from "./data/clubs"
 
 function App() {
   const seed = useGameStore((s) => s.seed)
@@ -70,6 +71,9 @@ function App() {
     name: string
     ovr: number
   } | null>(null)
+  const [attackedTeam, setAttackedTeam] = useState<string | null>(null)
+  const [attackedTeamId, setAttackedTeamId] = useState<number | null>(null)
+  const [selectedDirection, setSelectedDirection] = useState<Direction | null>(null)
 
   const liveTeams = useMemo(() => teams.filter((t) => t.alive), [teams])
   
@@ -81,8 +85,15 @@ function App() {
   }, [liveTeams])
   
   const spinnerColors = useMemo(() => 
-    liveTeams.map((t) => t.color),
-    [liveTeams]
+    liveTeams.map((t) => {
+      // Takım renklerini kontrol et - önce colors array'ini, sonra color'ı kullan
+      const club = (COUNTRY_CLUBS[selectedCountry] || []).find((c: any) => c.name === t.name)
+      if (club?.colors && club.colors.length > 0) {
+        return club.colors[0] // İlk renk (ana renk)
+      }
+      return t.color || '#3b82f6'
+    }),
+    [liveTeams, selectedCountry]
   )
   const spinnerFullNames = useMemo(() => 
     liveTeams.length ? liveTeams.map((t) => t.name) : undefined,
@@ -116,16 +127,11 @@ function App() {
     c: cells.map((c) => c.id)
   })
   useEffect(() => {
-    if (
-      teamWinner !== null &&
-      uiStep === "attacking"
-    ) {
+    if (teamWinner !== null && uiStep === "attacking" && selectedDirection != null) {
       const attackerTeam = liveTeams.find(t => t.id === teamWinner)
       if (!attackerTeam) return
 
-      // Use a random direction for now
-      const direction = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)] as Direction
-      const t = resolveTarget(attackerTeam.id, direction)
+      const t = resolveTarget(attackerTeam.id, selectedDirection)
       if (t) {
         const defenderId = cells.find((c) => c.id === t.toCellId)?.ownerTeamId
         const defender = teams.find((tm) => tm.id === defenderId)
@@ -151,7 +157,8 @@ function App() {
     teams,
     cells,
     setPreviewTarget,
-    resolveTarget
+    resolveTarget,
+    selectedDirection
   ])
 
 
@@ -312,7 +319,7 @@ function App() {
                 {/* Version Tooltip */}
                 <div className="absolute -top-8 -right-12 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:-translate-y-1 z-50">
                   <div className="bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-bold rounded-lg px-4 py-2 text-base shadow-2xl border-2 border-white/20 whitespace-nowrap">
-                    v0.8.0
+                    v0.8.3
                   </div>
                 </div>
               </div>
@@ -488,6 +495,8 @@ function App() {
                   showTeamSpinner={uiStep === "team" && teamSpinTarget !== undefined}
                   uiStep={uiStep || ""}
                   cells={cells}
+                  attackedTeam={attackedTeam}
+                  attackedTeamId={attackedTeamId}
                   teamSpinnerProps={{
                     items: spinnerItems,
                     colors: spinnerColors,
@@ -583,6 +592,7 @@ function App() {
                           setShowDefenderInfo(false)
                           setDefenderInfo(null)
                           setAnnouncement(null)
+                          setAttackedTeamId(null)
                           // Clear previous turn's winner
                           setTeamWinner(null)
                         } catch (e) {
@@ -622,32 +632,26 @@ function App() {
                   <div className="space-y-3">
                     <button
                       onClick={() => {
-                        console.log('🎯 Direction button clicked:', { teamWinner, liveTeams: liveTeams.map(t => ({ id: t.id, name: t.name })) })
                         const attacker = liveTeams.find(t => t.id === teamWinner)
                         if (!attacker) {
-                          console.error('❌ Attacker not found!')
                           return
                         }
-                        console.log('🎯 Attacker found:', { id: attacker.id, name: attacker.name })
                         
                         // Start rotating arrow animation (5 seconds)
                         const randomAngle = Math.random() * 360
                         setRotatingArrow(attacker.id, randomAngle)
                         setUiStep("direction-spinning")
+                        // Show guidance beam only during direction selection
+                        try { setBeam(true, undefined) } catch {}
                         
                         // After 5 seconds, arrow stops and beam starts
                         setTimeout(() => {
-                          // Beam direction based on arrow angle - SVG uses 0°=North, Math uses 0°=East
-                          // Convert SVG angle to Math angle: SVG 0°=North, Math 0°=East, so subtract 90°
-                          const angleRad = (randomAngle - 90) * Math.PI / 180
+                          // Ok yönüne en yakın 8-yön eşleştirmesi için dereceye çevrilir
                           
-                          // Debug: Log the beam direction
-                          console.log('🎯 Beam direction angleRad:', angleRad, 'Math.cos:', Math.cos(angleRad), 'Math.sin:', Math.sin(angleRad))
                           
                           // Find target in beam direction
-                          const attackerCells = cells.filter(c => c.ownerTeamId === attacker.id)
-                          if (attackerCells.length === 0) {
-                            console.error('❌ Attacker has no cells!')
+                          const attackerCells2 = cells.filter(c => c.ownerTeamId === attacker.id)
+                          if (attackerCells2.length === 0) {
                             setAnnouncement('❌ Hata: Saldıran takımın toprağı yok!')
                             setRotatingArrow(undefined, undefined)
                             setUiStep("direction-ready")
@@ -658,7 +662,7 @@ function App() {
                           
                           // Calculate attacker's center using centroid
                           let totalX = 0, totalY = 0, validCount = 0
-                          for (const cell of attackerCells) {
+                          for (const cell of attackerCells2) {
                             const centroid = (cell as any).centroid
                             if (centroid && Array.isArray(centroid) && centroid.length === 2) {
                               totalX += centroid[0]
@@ -668,7 +672,6 @@ function App() {
                           }
                           
                           if (validCount === 0) {
-                            console.error('❌ No valid centroids found!')
                             setAnnouncement('❌ Hata: Takım merkezi bulunamadı!')
                             setRotatingArrow(undefined, undefined)
                             setUiStep("direction-ready")
@@ -677,65 +680,74 @@ function App() {
                             return
                           }
                           
-                          const startX = totalX / validCount
-                          const startY = totalY / validCount
+                          // Takım merkezi hesaplandı (gerekirse görsellerde kullanılabilir)
                           
-                          console.log('🎯 Arrow stopped at angle:', randomAngle, 'degrees')
-                          console.log('📍 Attacker center:', { startX, startY })
-                          
-                          // Find first team hit by beam
-                          const beamDir = [Math.cos(angleRad), Math.sin(angleRad)]
-                          let closestHit: any = null
-                          let closestDistance = Infinity
-                          
-                          for (const cell of cells) {
-                            if (cell.ownerTeamId === attacker.id) continue
-                            if (cell.ownerTeamId === -1 || cell.ownerTeamId == null) continue
-                            
-                            const cellCentroid = (cell as any).centroid
-                            if (!cellCentroid || !Array.isArray(cellCentroid) || cellCentroid.length !== 2) continue
-                            
-                            const dx = cellCentroid[0] - startX
-                            const dy = cellCentroid[1] - startY
-                            
-                            // Check if cell is in beam direction
-                            const dotProduct = dx * beamDir[0] + dy * beamDir[1]
-                            if (dotProduct <= 0) continue // Behind beam
-                            
-                            // Calculate perpendicular distance
-                            const distance = Math.sqrt(dx * dx + dy * dy)
-                            const perpDistance = Math.abs(dx * beamDir[1] - dy * beamDir[0])
-                            
-                            // Wider beam tolerance for better hit detection
-                            if (perpDistance < 200 && distance < closestDistance) {
-                              closestDistance = distance
-                              closestHit = cell
-                            }
+                          // En yakın 8-yön eşleştirmesine göre gerçek hedefi hesapla
+                          // Arrow final angle (0°=East basis)
+                          // Arrow visual rotates clockwise; 0° at top (North). Convert to screen angle (0°=East, CCW):
+                          const arrowDeg = (450 - (randomAngle % 360)) % 360
+
+                          // Evaluate all 8 directions and pick the one whose target vector
+                          // aligns best with the arrow angle from the attacker's center
+                          const candDirs: Direction[] = ['E','NE','N','NW','W','SW','S','SE']
+                          let bestDir: Direction | null = null
+                          let bestDiff = Infinity
+                          let bestResolved: { fromCellId: number; toCellId: number } | null = null
+
+                          // Compute attacker center used earlier
+                          let totalX2 = 0, totalY2 = 0, count2 = 0
+                          for (const c of attackerCells2) {
+                            const cent = (c as any).centroid
+                            if (cent && cent.length === 2) { totalX2 += cent[0]; totalY2 += cent[1]; count2++ }
                           }
-                          
-                          if (closestHit) {
-                            const defender = teams.find(t => t.id === closestHit.ownerTeamId)
-                            if (defender) {
-                              console.log('✅ Hedef bulundu:', defender.name, 'at distance:', closestDistance)
-                              setUiStep("attacking")
-                              setShowAttackerInfo(false)
-                              setPreviewTarget(attacker.capitalCellId, closestHit.id)
-                              setBeam(true, closestHit.ownerTeamId)
-                            } else {
-                              console.warn('⚠️ Defender team not found')
+                          const sx = count2 > 0 ? totalX2 / count2 : 0
+                          const sy = count2 > 0 ? totalY2 / count2 : 0
+
+                          for (const d of candDirs) {
+                            const r = resolveTarget(attacker.id, d)
+                            if (!r) continue
+                            const to = cells.find((c) => c.id === r.toCellId) as any
+                            if (!to?.centroid) continue
+                            const dx = to.centroid[0] - sx
+                            const dy = to.centroid[1] - sy
+                            // Screen Y grows down; convert to math angle with 0°=East
+                            const deg = (Math.atan2(-dy, dx) * 180 / Math.PI + 360) % 360
+                            const raw = Math.abs(deg - arrowDeg)
+                            const diff = Math.min(raw, 360 - raw)
+                            if (diff < bestDiff) { bestDiff = diff; bestDir = d; bestResolved = r }
+                          }
+
+                          const selectedDir = (bestDir ?? 'N') as Direction
+                          setSelectedDirection(selectedDir)
+
+                          const resolved = (useGameStore.getState() as { resolveTargetByAngle?: (a:number,b:number)=>{fromCellId:number;toCellId:number}|null }).resolveTargetByAngle?.(attacker.id, arrowDeg) || bestResolved
+                          if (resolved) {
+                            // Önce önizlemeyi sabitle (ışın + sınır animasyonu gözüksün)
+                            setPreviewTarget(resolved.fromCellId, resolved.toCellId)
+                            // Yol gösterici ışını kapat
+                            try { setBeam(false, undefined) } catch {}
+                            setUiStep("attacking")
+                            setShowAttackerInfo(false)
+
+                            // Banner’ı ve attackedTeam bilgisini kısa bir gecikmeden sonra, 
+                            // doğrudan previewTo üzerinden hesapla (yanlış eşleşmeyi engeller)
+                            setTimeout(() => {
+                              const { previewToCellId } = useGameStore.getState() as { previewToCellId?: number }
+                              if (previewToCellId == null) return
+                              const defId = cells.find(c => c.id === previewToCellId)?.ownerTeamId
+                              const defTeam = teams.find(t => t.id === defId)
+                              if (defTeam) {
+                                setAttackedTeam(defTeam.name)
+                                setAttackedTeamId(defTeam.id)
+                                setAnnouncement(`🎯 Saldırılan Takım: ${defTeam.name}`)
+                              }
+                            }, 800)
+                          } else {
                               setAnnouncement('⚠️ Bu yönde takım bulunamadı!')
                               setRotatingArrow(undefined, undefined)
                               setUiStep("direction-ready")
                               // Auto-hide after 2 seconds
                               setTimeout(() => setAnnouncement(null), 2000)
-                            }
-                          } else {
-                            console.warn('⚠️ No target found in beam direction')
-                            setAnnouncement('⚠️ Bu yönde takım bulunamadı!')
-                            setRotatingArrow(undefined, undefined)
-                            setUiStep("direction-ready")
-                            // Auto-hide after 2 seconds
-                            setTimeout(() => setAnnouncement(null), 2000)
                           }
                         }, 2000) // Wait for arrow rotation (2 seconds now)
                       }}
@@ -760,6 +772,51 @@ function App() {
                     <div className="text-blue-400 text-sm mt-1">
                       Haritada dönen oku izleyin
                     </div>
+                  </div>
+                )}
+
+                {uiStep === "attacking" && (
+                  <div className="flex justify-center mb-4">
+                    <button
+                      onClick={() => {
+                        const attacker = liveTeams.find(t => t.id === teamWinner)
+                        const storeState = useGameStore.getState() as { previewToCellId?: number, previewFromCellId?: number }
+                        const previewToId = storeState.previewToCellId
+                        const previewFromId = storeState.previewFromCellId
+                        if (!attacker || previewToId == null || previewFromId == null) return
+                        // Hide stale banner and ensure no beam during battle
+                        setAnnouncement(null)
+                        setUiStep("direction-spinning")
+                        try { setBeam(false, undefined) } catch {}
+                        // Apply battle after a short animation
+                        setTimeout(() => {
+                          (useGameStore.getState() as { applyAttackToCell: (a:number,f:number,t:number)=>{success:boolean} }).applyAttackToCell(attacker.id, previewFromId, previewToId)
+                          // Cleanup and prepare next turn
+                          try {
+                            setBeam(false, undefined)
+                            setRotatingArrow(undefined, undefined)
+                            setPreviewTarget(undefined, undefined)
+                          } catch (e) {
+                            console.warn(e)
+                          }
+                          setAttackedTeam(null)
+                          setAttackedTeamId(null)
+                          setAnnouncement(null)
+                          setSelectedDirection(null)
+                          setTeamWinner(null)
+                          setUiStep(null)
+                        }, 1400)
+                      }}
+                      className="group relative overflow-hidden bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20 w-full"
+                    >
+                      <span className="relative z-10 flex items-center justify-center gap-2">
+                        <span className="text-xl">⚔️</span>
+                        <span className="text-base">Mücadeleyi Başlat</span>
+                        <span className="text-xl">🔥</span>
+                      </span>
+                      <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
+                      <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    </button>
                   </div>
                 )}
 
@@ -831,21 +888,22 @@ function App() {
                         .slice()
                         .reverse()
                           .slice(0, 5)
-                        .map((h, idx) => (
+                        .map((h, idx) => {
+                          const attackerName = teams.find((t) => t.id === h.attackerTeamId)?.name ?? '—'
+                          const defenderName = h.defenderTeamId === -1 ? 'Neutral' : (teams.find((t) => t.id === (h.defenderTeamId ?? -99))?.name ?? '—')
+                          const winnerName = h.attackerWon ? attackerName : defenderName
+                          return (
                             <div key={idx} className="flex items-center justify-between rounded-md p-1.5 text-xs backdrop-blur-sm border border-white/5"
-                                 style={{
-                                   background: 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))'
-                                 }}>
-                              <span className="font-mono text-white/80">
-                                #{h.turn} {teams.find((t) => t.id === h.attackerTeamId)?.name} → {h.direction}
+                              style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))' }}>
+                              <span className="text-white/85">
+                                #{h.turn} {attackerName} vs {defenderName}
                               </span>
-                              <span className={`px-1.5 py-0.5 rounded-full text-xs ${
-                                h.attackerWon ? "bg-emerald-500/20 text-emerald-300" : "bg-red-500/20 text-red-300"
-                              }`}>
-                              {h.attackerWon ? "✅" : "❌"}
-                            </span>
+                              <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${h.attackerWon ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}`}>
+                                {winnerName}
+                              </span>
                             </div>
-                        ))}
+                          )
+                        })}
                       </div>
                   )}
                   </div>
@@ -911,29 +969,27 @@ function App() {
           </button>
         </div>
       </div>
+      {/* Restart button (desktop) */}
+      <div className="hidden md:flex fixed bottom-4 right-4 z-40">
+        <button
+          className="rounded-xl px-4 py-2 font-semibold text-white bg-gradient-to-r from-slate-600 to-slate-800 border border-white/20 shadow-lg hover:from-slate-500 hover:to-slate-700"
+          onClick={() => window.location.reload()}
+        >
+          Yeniden Başlat
+        </button>
+      </div>
       {isGameOver && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
-            <h3 className="text-xl font-semibold">Game Over</h3>
-            <p className="mt-2 text-gray-700">Winner: {liveTeams[0]?.name}</p>
-            <div className="mt-4 flex justify-end gap-2">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-slate-900/80 to-black/70 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-white/20 p-6 backdrop-blur-xl"
+               style={{background:'linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))'}}>
+            <h3 className="text-2xl font-extrabold text-white mb-2">Oyun Bitti</h3>
+            <p className="text-slate-200">Kazanan: {liveTeams[0]?.name}</p>
+            <div className="mt-4 flex justify-end">
               <button
-                className="rounded bg-gray-700 px-4 py-2 text-white hover:bg-gray-800"
+                className="rounded-xl px-4 py-2 font-semibold text-white bg-gradient-to-r from-slate-600 to-slate-800 border border-white/20 shadow-lg hover:from-slate-500 hover:to-slate-700"
                 onClick={() => window.location.reload()}
               >
-                New Game
-              </button>
-              <button
-                className="rounded bg-rose-600 px-4 py-2 text-white hover:bg-rose-700"
-                onClick={() => {
-                  const r = playAutoTurn()
-                  if (r.success) {
-                    playClick()
-                    setTimeout(() => playCapture(), 120)
-                  }
-                }}
-              >
-                Fast Auto Turn
+                Yeniden Başlat
               </button>
             </div>
           </div>

@@ -164,12 +164,17 @@ export function ModernSpinner({
             
             return (
               <g key={index}>
+                <defs>
+                  <linearGradient id={`team-gradient-${index}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stopColor={color} stopOpacity="0.8" />
+                    <stop offset="100%" stopColor={color} stopOpacity="0.4" />
+                  </linearGradient>
+                </defs>
                 <path
                   d={`M 50,50 L ${x1},${y1} A ${radius},${radius} 0 ${largeArcFlag},1 ${x2},${y2} Z`}
-                  fill={color}
-                  fillOpacity={0.6}
-                  stroke="rgba(255,255,255,0.3)"
-                  strokeWidth="0.5"
+                  fill={`url(#team-gradient-${index})`}
+                  stroke="rgba(255,255,255,0.4)"
+                  strokeWidth="1"
                   filter="url(#segment-glow)"
                 />
                 
