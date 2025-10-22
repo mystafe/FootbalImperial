@@ -74,6 +74,26 @@ function App() {
   const [attackedTeam, setAttackedTeam] = useState<string | null>(null)
   const [attackedTeamId, setAttackedTeamId] = useState<number | null>(null)
   const [selectedDirection, setSelectedDirection] = useState<Direction | null>(null)
+  const [manualMapping, setManualMapping] = useState<Record<number, number>>({})
+  const manualClubs = useMemo(() => (COUNTRY_CLUBS[selectedCountry] || []), [selectedCountry])
+  const [manualSelectedClubIdx, setManualSelectedClubIdx] = useState<number | null>(0)
+  const manualPlacedCount = useMemo(() => Object.keys(manualMapping).length, [manualMapping])
+  const manualPickedSet = useMemo(() => new Set(Object.values(manualMapping)), [manualMapping])
+  const leagueMax = useMemo(() => {
+    switch (selectedCountry) {
+      case 'England':
+      case 'Italy':
+      case 'Spain':
+        return 20
+      case 'France':
+      case 'Germany':
+      case 'Portugal':
+      case 'Netherlands':
+      case 'Turkey':
+      default:
+        return 18
+    }
+  }, [selectedCountry])
 
   const liveTeams = useMemo(() => teams.filter((t) => t.alive), [teams])
   
@@ -319,7 +339,7 @@ function App() {
                 {/* Version Tooltip */}
                 <div className="absolute -top-8 -right-12 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:-translate-y-1 z-50">
                   <div className="bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-bold rounded-lg px-4 py-2 text-base shadow-2xl border-2 border-white/20 whitespace-nowrap">
-                    v0.8.3
+                    v0.9.2
                   </div>
                 </div>
               </div>
@@ -353,7 +373,7 @@ function App() {
               <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/20 via-blue-500/20 to-purple-500/20 rounded-2xl blur-sm"></div>
               <div className="absolute inset-0 bg-gradient-to-br from-slate-800/90 via-slate-900/95 to-slate-800/90 rounded-2xl border border-slate-700/50 backdrop-blur-xl"></div>
               
-              <div className="relative p-6">
+            <div className="relative p-6">
                 <div className="grid gap-5 lg:grid-cols-2">
                   {/* Left Column */}
                   <div className="space-y-5">
@@ -383,14 +403,14 @@ function App() {
                   <input
                     type="number"
                     min={2}
-                    max={25}
+                    max={leagueMax}
                     value={numTeams}
                     onChange={(e) =>
                       setNumTeams(parseInt(e.target.value || "0", 10))
                     }
                         className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 transition-all duration-200 backdrop-blur-sm hover:bg-slate-700/70"
                   />
-                      <p className="mt-2 text-xs text-slate-400">2-25 arası takım seçebilirsiniz</p>
+                      <p className="mt-2 text-xs text-slate-400">2-{leagueMax} arası takım seçebilirsiniz</p>
                 </div>
                   </div>
 
@@ -448,11 +468,12 @@ function App() {
               </div>
                 </div>
 
+                {/* Manual team picker */}
                 {/* Start Button */}
                 <div className="mt-4 pt-4 border-t border-slate-700/50">
                 <button
                     className="group relative w-full bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-400 hover:to-blue-400 text-white font-bold py-2.5 px-5 rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-2xl focus:outline-none focus:ring-4 focus:ring-emerald-400/30"
-                  onClick={() => setGameStarted(true)}
+                  onClick={() => { if (config.manualMode) { setManualMapping({}); setManualSelectedClubIdx(0) } ; setGameStarted(true) }}
                 >
                     <span className="relative z-10 flex items-center justify-center gap-2">
                       <span className="text-base">🏆</span>
@@ -495,8 +516,40 @@ function App() {
                   showTeamSpinner={uiStep === "team" && teamSpinTarget !== undefined}
                   uiStep={uiStep || ""}
                   cells={cells}
+                  fastMode={config.fastMode}
+                  manualMode={config.manualMode}
+                  manualMapping={config.manualMode ? manualMapping : undefined}
                   attackedTeam={attackedTeam}
                   attackedTeamId={attackedTeamId}
+                  onCellClick={(cellId:number)=>{
+                    if (!config.manualMode) return
+                    if (manualSelectedClubIdx == null) return
+                    const assignIdx = manualSelectedClubIdx
+                    // Move team if already placed: remove its old cell
+                    const prevForTeam = Object.entries(manualMapping).find(([, idx]) => idx === assignIdx)
+                    const nextMap: Record<number, number> = { ...manualMapping }
+                    if (prevForTeam) delete nextMap[Number(prevForTeam[0])]
+                    // If target cell occupied by another team, free it (that team becomes unplaced)
+                    if (nextMap[cellId] != null) delete nextMap[cellId]
+                    nextMap[cellId] = assignIdx
+                    setManualMapping(nextMap)
+                    // Instant feedback announcement
+                    const club = manualClubs[assignIdx]
+                    if (club) {
+                      setAnnouncement(`📍 ${club.name} yerleştirildi`)
+                      setTimeout(() => setAnnouncement(null), 1200)
+                    }
+                    const placed = Object.keys(nextMap).length
+                    if (placed >= numTeams) {
+                      // Final toast when all placements are done
+                      setAnnouncement('✅ Yerleşim tamamlandı, oyun hazır!')
+                      setTimeout(() => setAnnouncement(null), 1200)
+                      return
+                    }
+                    // Auto-focus next unplaced team for faster flow
+                    const nextIdx = manualClubs.findIndex((_, idx) => !Object.values(nextMap).includes(idx))
+                    setManualSelectedClubIdx(nextIdx >= 0 ? nextIdx : null)
+                  }}
                   teamSpinnerProps={{
                     items: spinnerItems,
                     colors: spinnerColors,
@@ -577,7 +630,7 @@ function App() {
                   </motion.div>
                 )}
                 {/* Team Selection Button */}
-                {uiStep !== "team" && teamWinner === null && (
+                {uiStep !== "team" && teamWinner === null && (!config.manualMode || (config.manualMode && (!gameStarted || Object.keys(manualMapping).length >= numTeams))) && (
                   <div className="flex justify-center mb-4">
                       <button
                         onClick={() => {
@@ -617,6 +670,32 @@ function App() {
                       </button>
                     </div>
                   )}
+                {config.manualMode && gameStarted && manualPlacedCount < numTeams && (
+                  <div className="w-full text-center py-3 px-4 bg-amber-900/20 rounded-xl border border-amber-500/30 mb-3">
+                    <div className="text-amber-300 text-sm font-medium mb-2">Manuel yerleşim</div>
+                    {/* Selectable teams (all teams) */}
+                    <div className="flex flex-wrap gap-2 justify-center mb-2">
+                      {manualClubs.map((c, idx) => (
+                        <button key={idx} onClick={()=> setManualSelectedClubIdx(idx)}
+                          className={`px-2 py-1 rounded-md text-xs border ${manualSelectedClubIdx===idx? 'border-amber-400 text-amber-300':'border-white/10 text-white/80'}`}>{c.name}</button>
+                      ))}
+                    </div>
+                    {/* Picked teams list */}
+                    {manualPickedSet.size > 0 && (
+                      <div className="mt-2">
+                        <div className="text-emerald-300 text-xs mb-1">Seçilenler</div>
+                        <div className="flex flex-wrap gap-2 justify-center">
+                          {manualClubs.map((c, idx) => manualPickedSet.has(idx) && (
+                            <button key={`picked-${idx}`} onClick={()=> setManualSelectedClubIdx(idx)}
+                              className={`px-2 py-1 rounded-md text-xs border bg-emerald-600/20 border-emerald-400/40 text-emerald-200 ${manualSelectedClubIdx===idx? 'ring-2 ring-emerald-400':'hover:border-emerald-400/60'}`}>{c.name}</button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <div className="text-amber-400 text-xs mt-2">Seçtiğiniz takımın merkezini haritada tıklayın ({manualPlacedCount}/{numTeams})</div>
+                  </div>
+                )}
+
                 {uiStep === "team" && teamSpinTarget !== undefined && (
                   <div className="w-full text-center py-4 px-6 bg-amber-900/20 rounded-xl border border-amber-500/30">
                     <div className="text-amber-300 animate-pulse text-lg font-medium">
@@ -857,14 +936,17 @@ function App() {
                       const teamHistory = history.filter((h) => h.attackerTeamId === t.id)
                       const wins = teamHistory.filter((h) => h.attackerWon).length
                       const losses = teamHistory.length - wins
+                      const clubInfo = (COUNTRY_CLUBS[selectedCountry] || []).find((c:any)=> c.name === t.name)
+                      const primary = clubInfo?.colors?.[0] || t.color
                       
                       return (
-                        <div key={t.id} className="flex items-center justify-between rounded-lg p-2 backdrop-blur-sm border border-white/10"
+                        <div key={t.id} className="flex items-center justify-between rounded-lg p-2 backdrop-blur-sm border"
                              style={{
-                               background: 'linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.03))'
+                               background: `linear-gradient(135deg, ${primary}20, rgba(255,255,255,0.03))`,
+                               borderColor: `${primary}55`
                              }}>
                           <div className="flex items-center gap-2">
-                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: t.color }}></div>
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: primary }}></div>
                             <span className="text-xs font-medium text-white">{t.name}</span>
                 </div>
                           <div className="flex items-center gap-3 text-xs">

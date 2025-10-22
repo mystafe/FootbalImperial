@@ -6,7 +6,7 @@ import world110 from "world-atlas/countries-110m.json" with { type: "json" }
 import { Delaunay } from "d3-delaunay"
 import { polygonCentroid } from "d3-polygon"
 import { createRng } from "../lib/random"
-import { COUNTRY_CLUBS } from "../data/clubs"
+import { COUNTRY_CLUBS, type Club } from "../data/clubs"
 import { motion } from "framer-motion"
 import ModernSpinner from "./ModernSpinner"
 import { BALANCE } from "../data/balance"
@@ -42,13 +42,21 @@ interface MapViewProps {
   cells?: any[]
   attackedTeam?: string | null
   attackedTeamId?: number | null
+  fastMode?: boolean
+  manualMode?: boolean
+  manualMapping?: Record<number, number>
+  onCellClick?: (cellId: number) => void
 }
 
 export default function MapView({
   showTeamSpinner = false,
   teamSpinnerProps,
   attackedTeam: _attackedTeam = null,
-  attackedTeamId = null
+  attackedTeamId = null,
+  fastMode = false,
+  manualMode = false,
+  manualMapping,
+  onCellClick
 }: MapViewProps) {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
@@ -83,8 +91,9 @@ export default function MapView({
     if (rotatingArrowAngle == null) return
     
     const startTime = Date.now()
-    const duration = 2000 // 2 seconds
-    const targetRotation = rotatingArrowAngle + 360 * 3
+    const duration = fastMode ? 400 : 2000
+    const spins = fastMode ? 1 : 3
+    const targetRotation = rotatingArrowAngle + 360 * spins
     
     const animate = () => {
       const elapsed = Date.now() - startTime
@@ -102,7 +111,7 @@ export default function MapView({
     }
     
     requestAnimationFrame(animate)
-  }, [rotatingArrowAngle])
+  }, [rotatingArrowAngle, fastMode])
 
   useEffect(() => {
     const onResize = () => {
@@ -245,58 +254,77 @@ export default function MapView({
 
   useEffect(() => {
     if (!voronoiPolys.length) return
-    const sig = `${selected}|${numTeams}|${size.w}x${size.h}|${seed}|${points.length}|${voronoiPolys.length}`
+    const sig = `${selected}|${numTeams}|${size.w}x${size.h}|${seed}|${points.length}|${voronoiPolys.length}|manual:${manualMode?JSON.stringify(manualMapping||{}):'off'}`
     if (initSigRef.current === sig) return
-    if (teams.length === points.length && storeCells.length === voronoiPolys.length && teams.length > 0) {
+    if (!manualMode && teams.length === points.length && storeCells.length === voronoiPolys.length && teams.length > 0) {
       initSigRef.current = sig
       return
     }
     try {
       const clubs = (COUNTRY_CLUBS[selected] || [])
-      // Use only the first N clubs based on priority order
-      const selectedClubs = clubs.slice(0, points.length)
-      
-      // Assign teams: match each club to its closest cell position
-      const clubAssignments: { clubIndex: number, cellIndex: number, distance: number }[] = []
-      
-      // For each club, find all possible cell assignments with distances
-      for (let j = 0; j < selectedClubs.length; j++) {
-        const club = selectedClubs[j] as { lon: number, lat: number }
-        const clubXY = projection([club.lon, club.lat]) as [number, number] | null
-        if (clubXY) {
-          for (let i = 0; i < points.length; i++) {
-            const cellCenter = points[i]
-            const distance = Math.sqrt(
-              Math.pow(cellCenter[0] - clubXY[0], 2) + 
-              Math.pow(cellCenter[1] - clubXY[1], 2)
-            )
-            clubAssignments.push({ clubIndex: j, cellIndex: i, distance })
-          }
+      // In manual mode, wait until mapping is complete
+      if (manualMode) {
+        const mapSize = Object.keys(manualMapping || {}).length
+        if (mapSize < points.length) {
+          return
         }
       }
+      // Manual mapping: map each cell index i -> club index manualMapping[i]
+      const selectedClubs: (Club | undefined)[] = (manualMode && manualMapping && Object.keys(manualMapping).length === points.length)
+        ? Array.from({ length: points.length }, (_, i) => {
+            const idx = (manualMapping as Record<number, number>)[i]
+            return clubs[idx] as Club | undefined
+          })
+        : clubs.slice(0, points.length)
       
-      // Sort by distance and assign clubs to cells (greedy assignment)
-      clubAssignments.sort((a, b) => a.distance - b.distance)
+      // Assign teams: if manual, map 1-1 by index; else, match by closest cells
+      const clubAssignments: { clubIndex: number, cellIndex: number, distance: number }[] = []
       const assignedCells = new Set<number>()
       const assignedClubs = new Set<number>()
       const cellToClub: { [cellIndex: number]: number } = {}
-      
-      for (const assignment of clubAssignments) {
-        if (!assignedCells.has(assignment.cellIndex) && !assignedClubs.has(assignment.clubIndex)) {
-          cellToClub[assignment.cellIndex] = assignment.clubIndex
-          assignedCells.add(assignment.cellIndex)
-          assignedClubs.add(assignment.clubIndex)
+      if (manualMode && selectedClubs.every(Boolean)) {
+        for (let i = 0; i < points.length; i++) {
+          cellToClub[i] = i
+          assignedCells.add(i)
+          assignedClubs.add(i)
+        }
+      } else {
+        // For each club, find all possible cell assignments with distances
+        for (let j = 0; j < selectedClubs.length; j++) {
+          const club = selectedClubs[j] as Club
+          if (!club) continue
+          const clubXY = projection([club.lon, club.lat]) as [number, number] | null
+          if (clubXY) {
+            for (let i = 0; i < points.length; i++) {
+              const cellCenter = points[i]
+              const distance = Math.sqrt(
+                Math.pow(cellCenter[0] - clubXY[0], 2) + 
+                Math.pow(cellCenter[1] - clubXY[1], 2)
+              )
+              clubAssignments.push({ clubIndex: j, cellIndex: i, distance })
+            }
+          }
+        }
+        // Sort by distance and assign clubs to cells (greedy assignment)
+        clubAssignments.sort((a, b) => a.distance - b.distance)
+        for (const assignment of clubAssignments) {
+          if (!assignedCells.has(assignment.cellIndex) && !assignedClubs.has(assignment.clubIndex)) {
+            cellToClub[assignment.cellIndex] = assignment.clubIndex
+            assignedCells.add(assignment.cellIndex)
+            assignedClubs.add(assignment.clubIndex)
+          }
         }
       }
       
       // Create teams based on assignments
       const teamsLocal = (teamColors as unknown[]).map((colors, i) => {
         const clubIndex = cellToClub[i] ?? 0
-        const assignedClub = selectedClubs[clubIndex] as { name: string, overall?: number, abbreviation?: string }
+        const assignedClub = selectedClubs[clubIndex] as Club
+        const primaryColor = (manualMode ? (assignedClub?.colors?.[0] || assignedClub?.color) : undefined) || (Array.isArray(colors) ? (colors as string[])[0] : (colors as string))
         return {
           id: i, 
           name: assignedClub.name, 
-          color: Array.isArray(colors) ? (colors as string[])[0] : (colors as string), 
+          color: primaryColor || "#3b82f6", 
           alive: true, 
           overall: assignedClub.overall ?? 75,
           abbreviation: assignedClub.abbreviation
@@ -315,7 +343,7 @@ export default function MapView({
     } catch (error) {
       console.error('Error initializing map:', error)
     }
-  }, [voronoiPolys, teamColors, points, setTeamsAndCells, selected, numTeams, mapColoring, size.w, size.h, seed, teams.length, storeCells.length])
+  }, [voronoiPolys, teamColors, points, setTeamsAndCells, selected, numTeams, mapColoring, size.w, size.h, seed, teams.length, storeCells.length, manualMode, manualMapping])
 
   return (
     <div className="relative w-full h-full max-w-6xl mx-auto p-4">
@@ -384,15 +412,20 @@ export default function MapView({
               console.warn(`Voronoi poly ${i} is null`)
               return null
             }
-            // Find cell by ID instead of index
-            const cell = storeCells.find(c => (c as { id: number }).id === i)
+            // Find cell by ID; if not present and manualMode pre-phase, build a pseudo cell
+            let cell = storeCells.find(c => (c as { id: number }).id === i) as unknown as { id: number; ownerTeamId: number; centroid: [number, number] } | undefined
             if (!cell) {
-              // Skip rendering if store cells not ready yet
-              if (storeCells.length === 0) {
+              if (manualMode && storeCells.length === 0) {
+                const c = polygonCentroid(poly as [number, number][]) as [number, number]
+                cell = { id: i, ownerTeamId: -1, centroid: c }
+              } else {
+                // Skip rendering if store cells not ready yet
+                if (storeCells.length === 0) {
+                  return null
+                }
+                console.warn(`No cell found for voronoi poly ${i}, using neutral`)
                 return null
               }
-              console.warn(`No cell found for voronoi poly ${i}, using neutral`)
-              return null
             }
             const owner = teams.find((t) => (t as { id: number }).id === (cell as { ownerTeamId: number }).ownerTeamId)
             const last = history[history.length - 1]
@@ -412,6 +445,11 @@ export default function MapView({
             // lookup dual colors
             const club = owner ? (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (owner as { name: string }).name) : undefined
             const dual = mapColoring === "striped" && club?.colors
+            // Manual pre-phase: immediate provisional coloring from manualMapping
+            const prePhase = manualMode && storeCells.length === 0
+            const mappedIdx = prePhase ? (manualMapping ? (manualMapping as Record<number, number>)[i] : undefined) : undefined
+            const preClub = mappedIdx != null ? (COUNTRY_CLUBS[selected] || [])[mappedIdx] as unknown as { colors?: string[]; color?: string; name?: string; abbreviation?: string }
+                                           : undefined
             
             // Border logic removed - no internal borders between same team cells
             
@@ -420,18 +458,34 @@ export default function MapView({
                 <motion.path
                   key={`path-${i}-${ownerId}-${turn}`}
                   d={`M${poly.map((p: [number, number]) => p.join(",")).join("L")}Z`}
-                  fill={
-                    isNeutral
-                      ? BALANCE.neutrals.color
-                      : dual
-                      ? `url(#team-stripe-${(owner as { id: number })?.id})`
-                      : ((owner as { color?: string })?.color || "#ddd")
+                  fill={ prePhase
+                    ? (preClub ? ((preClub.colors && preClub.colors.length > 0 ? preClub.colors[0] : preClub.color) || BALANCE.neutrals.color) : BALANCE.neutrals.color)
+                    : (isNeutral
+                        ? BALANCE.neutrals.color
+                        : dual
+                        ? `url(#team-stripe-${(owner as { id: number })?.id})`
+                        : (
+                            // Solid: prefer club primary color to avoid mismatches (e.g., Galatasaray)
+                            (club?.colors && club.colors.length > 0
+                              ? club.colors[0]
+                              : ((owner as { color?: string })?.color || "#ddd")
+                            )
+                          )
+                      )
                   }
                   stroke={isAttackedTeam ? "#ff6b6b" : "none"}
                   strokeWidth={isAttackedTeam ? 3 : 0}
                   strokeOpacity={0.8}
                   strokeLinejoin="round"
                   strokeLinecap="round"
+                  style={{ cursor: manualMode && storeCells.length === 0 ? 'pointer' as const : undefined }}
+                  onClick={() => {
+                    if (manualMode && typeof (i) === 'number') {
+                      // When manualMode active, click communicates cell index to parent
+                      // Use provided onCellClick if available
+                      if (onCellClick) onCellClick(i)
+                    }
+                  }}
                   initial={{ opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }}
                   animate={
                     // Saldırılan takımın hücrelerini netleştir
@@ -447,13 +501,30 @@ export default function MapView({
                       : { opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }
                   }
                   transition={{ 
-                    opacity: { duration: 0.6, ease: "easeInOut" },
-                    filter: { duration: 0.8, ease: "easeInOut" },
-                    scale: { duration: 0.8, ease: "easeInOut" }
+                    opacity: { duration: fastMode ? 0.15 : 0.6, ease: "easeInOut" },
+                    filter: { duration: fastMode ? 0.18 : 0.8, ease: "easeInOut" },
+                    scale: { duration: fastMode ? 0.18 : 0.8, ease: "easeInOut" }
                   }}
                 >
                   <title>{`${(owner as { name?: string })?.name ?? (isNeutral ? 'Neutral' : 'Team')} • cell ${(cell as { id: number }).id}`}</title>
                 </motion.path>
+                {/* Manual pre-phase label/pin for instant feedback */}
+                {prePhase && preClub && (
+                  <g>
+                    {(() => {
+                      const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length
+                      const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length
+                      return (
+                        <>
+                          <circle cx={cx} cy={cy} r={10} fill="#000" opacity={0.25} />
+                          <text x={cx} y={cy + 3} textAnchor="middle" fontSize={10} fontWeight={700} fill="#fff">
+                            {(preClub.abbreviation || (preClub.name || '').slice(0,2)).toUpperCase()}
+                          </text>
+                        </>
+                      )
+                    })()}
+                  </g>
+                )}
                 
                 {/* Victory/Defeat animations on captured cell */}
                 {isCaptured && last && (
@@ -469,7 +540,7 @@ export default function MapView({
                         strokeWidth="6"
                         initial={{ opacity: 0, strokeWidth: 0 }}
                         animate={{ opacity: [0, 1, 0.8, 0], strokeWidth: [0, 12, 8, 0] }}
-                        transition={{ duration: 1.2, ease: "easeOut", delay: 0.1 }}
+                        transition={{ duration: fastMode ? 0.5 : 1.2, ease: "easeOut", delay: fastMode ? 0.05 : 0.1 }}
                       />
                       {/* Victory sparkles with multiple stars */}
                       {[0, 1, 2].map((i) => (
@@ -486,7 +557,7 @@ export default function MapView({
                             scale: [0, 1.8, 1.2, 0.3],
                             rotate: [0, 360]
                           }}
-                          transition={{ duration: 1.8, ease: "easeOut", delay: 0.2 + i * 0.1 }}
+                          transition={{ duration: fastMode ? 0.7 : 1.8, ease: "easeOut", delay: (fastMode ? 0.1 : 0.2) + i * (fastMode ? 0.05 : 0.1) }}
                         >
                           {["⭐", "✨", "🌟"][i]}
                         </motion.text>
@@ -504,7 +575,7 @@ export default function MapView({
                           scale: [0, 1.2, 1, 0.5],
                           y: [0, -10, 0]
                         }}
-                        transition={{ duration: 2, ease: "easeOut", delay: 0.5 }}
+                        transition={{ duration: fastMode ? 0.9 : 2, ease: "easeOut", delay: fastMode ? 0.2 : 0.5 }}
                       >
                         👑
                       </motion.text>
@@ -520,7 +591,7 @@ export default function MapView({
                         strokeWidth="6"
                         initial={{ opacity: 0, strokeWidth: 0 }}
                         animate={{ opacity: [0, 1, 0.6, 0], strokeWidth: [0, 10, 6, 0] }}
-                        transition={{ duration: 1.2, ease: "easeOut", delay: 0.1 }}
+                        transition={{ duration: fastMode ? 0.5 : 1.2, ease: "easeOut", delay: fastMode ? 0.05 : 0.1 }}
                       />
                       {/* Defeat symbols with multiple effects */}
                       {[0, 1, 2].map((i) => (
@@ -536,7 +607,7 @@ export default function MapView({
                             opacity: [0, 1, 1, 0],
                             scale: [3, 1, 0.8, 0]
                           }}
-                          transition={{ duration: 1.6, ease: "easeOut", delay: 0.2 + i * 0.15 }}
+                          transition={{ duration: fastMode ? 0.7 : 1.6, ease: "easeOut", delay: (fastMode ? 0.1 : 0.2) + i * (fastMode ? 0.07 : 0.15) }}
                         >
                           {["💥", "💢", "❌"][i]}
                         </motion.text>
@@ -554,7 +625,7 @@ export default function MapView({
                           scale: [2, 1, 0.5, 0],
                           rotate: [0, 180]
                         }}
-                        transition={{ duration: 2, ease: "easeOut", delay: 0.6 }}
+                        transition={{ duration: fastMode ? 0.9 : 2, ease: "easeOut", delay: fastMode ? 0.25 : 0.6 }}
                       >
                         💀
                       </motion.text>
@@ -1146,13 +1217,13 @@ export default function MapView({
                   opacity: [0, 0.3, 0.8, 1, 0.8, 0],
                   strokeWidth: [0, 2, 8, 16, 12, 0]
                 }}
-                transition={{ 
-                  duration: 3.0, 
+                  transition={{ 
+                  duration: fastMode ? 0.4 : 3.0, 
                   ease: "easeOut",
-                  x2: { duration: 3.0, ease: "easeOut" },
-                  y2: { duration: 3.0, ease: "easeOut" },
-                  opacity: { duration: 3.0, times: [0, 0.2, 0.4, 0.7, 0.9, 1] },
-                  strokeWidth: { duration: 3.0, times: [0, 0.1, 0.3, 0.6, 0.8, 1] }
+                  x2: { duration: fastMode ? 0.4 : 3.0, ease: "easeOut" },
+                  y2: { duration: fastMode ? 0.4 : 3.0, ease: "easeOut" },
+                  opacity: { duration: fastMode ? 0.4 : 3.0, times: [0, 0.2, 0.4, 0.7, 0.9, 1] },
+                  strokeWidth: { duration: fastMode ? 0.4 : 3.0, times: [0, 0.1, 0.3, 0.6, 0.8, 1] }
                 }}
               />
               
@@ -1175,7 +1246,7 @@ export default function MapView({
                       filter="url(#beamGlow)"
                       initial={{ r: 0, opacity: 1 }}
                       animate={{ r: [0, 50], opacity: [1, 0] }}
-                      transition={{ duration: 1.8, ease: "easeOut" }}
+                      transition={{ duration: fastMode ? 0.35 : 1.8, ease: "easeOut" }}
                     />
                     <motion.circle
                       cx={targetX}
@@ -1186,7 +1257,7 @@ export default function MapView({
                       filter="url(#beamGlow)"
                       initial={{ r: 0, opacity: 0 }}
                       animate={{ r: [0, 30, 0], opacity: [0, 0.9, 0] }}
-                      transition={{ duration: 2.2, ease: "easeOut" }}
+                      transition={{ duration: fastMode ? 0.4 : 2.2, ease: "easeOut" }}
                     />
                   </>
                 )
@@ -1206,6 +1277,7 @@ export default function MapView({
           winnerIndex={teamSpinnerProps.winnerIndex ?? 0}
           fullNames={teamSpinnerProps.fullNames ?? []}
           onDone={teamSpinnerProps.onDone ?? (() => {})}
+          durationMs={fastMode ? 600 : 3000}
         />
       )}
       

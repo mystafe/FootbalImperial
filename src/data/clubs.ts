@@ -14,215 +14,25 @@ export interface Club {
 
 export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
   Turkey: [
-    {
-      name: "Galatasaray",
-      city: "Istanbul",
-      lon: 28.965,
-      lat: 41.02,
-      color: "#A3262A",
-      colors: ["#F4C10F", "#A3262A"],
-      overall: 85,
-      abbreviation: "GS",
-      founded: 1905
-    },
-    {
-      name: "Fenerbahçe",
-      city: "Istanbul",
-      lon: 29.0634,
-      lat: 41.0214,
-      color: "#041E42",
-      colors: ["#FEE715", "#041E42"],
-      overall: 79,
-      abbreviation: "FB",
-      founded: 1907
-    },
-    {
-      name: "Beşiktaş",
-      city: "Istanbul",
-      lon: 29.01,
-      lat: 41.039,
-      color: "#000000",
-      colors: ["#000000", "#FFFFFF"],
-      overall: 78,
-      abbreviation: "BJK",
-      founded: 1903
-    },
-    {
-      name: "Trabzonspor",
-      city: "Trabzon",
-      lon: 39.7168,
-      lat: 41.0031,
-      color: "#7C162E",
-      colors: ["#7C162E", "#64B5F6"],
-      overall: 77,
-      abbreviation: "TS",
-      founded: 1967
-    },
-    {
-      name: "Samsunspor",
-      city: "Samsun",
-      lon: 36.3300,
-      lat: 41.2928,
-      color: "#FF0000",
-      colors: ["#FF0000", "#FFFFFF"],
-      overall: 75,
-      abbreviation: "SS",
-      founded: 1965
-    },
-    {
-      name: "Konyaspor",
-      city: "Konya",
-      lon: 32.4846,
-      lat: 37.8746,
-      color: "#0B6E4F",
-      colors: ["#0B6E4F", "#FFFFFF"],
-      overall: 74,
-      abbreviation: "KN",
-      founded: 1922
-    },
-    {
-      name: "Kayserispor",
-      city: "Kayseri",
-      lon: 35.4853,
-      lat: 38.7348,
-      color: "#D32F2F",
-      colors: ["#D32F2F", "#FBC02D"],
-      overall: 71,
-      abbreviation: "KY",
-      founded: 1966
-    },
-    {
-      name: "Antalyaspor",
-      city: "Antalya",
-      lon: 30.7133,
-      lat: 36.8969,
-      color: "#D50000",
-      colors: ["#D50000", "#FFFFFF"],
-      overall: 71,
-      abbreviation: "AT",
-      founded: 1966
-    },
-    {
-      name: "Başakşehir",
-      city: "Istanbul",
-      lon: 28.8076,
-      lat: 41.0931,
-      color: "#1B3A68",
-      colors: ["#1B3A68", "#FF6F00"],
-      overall: 76,
-      abbreviation: "BŞ",
-      founded: 1990
-    },
-    {
-      name: "Kasımpaşa",
-      city: "Istanbul",
-      lon: 28.974,
-      lat: 41.044,
-      color: "#0046AD",
-      colors: ["#0046AD", "#FFFFFF"],
-      overall: 70,
-      abbreviation: "KB",
-      founded: 1921
-    },
-    {
-      name: "İstanbulspor",
-      city: "Istanbul",
-      lon: 28.866,
-      lat: 41.06,
-      color: "#000000",
-      colors: ["#000000", "#FFD200"],
-      overall: 68,
-      abbreviation: "İS",
-      founded: 1926
-    },
-    {
-      name: "Karagümrük",
-      city: "Istanbul",
-      lon: 28.955,
-      lat: 41.022,
-      color: "#000000",
-      colors: ["#000000", "#FF0000"],
-      overall: 69,
-      abbreviation: "KG",
-      founded: 1926
-    },
-    {
-      name: "Gaziantep FK",
-      city: "Gaziantep",
-      lon: 37.3792,
-      lat: 37.0662,
-      color: "#C62828",
-      colors: ["#C62828", "#000000"],
-      overall: 70,
-      abbreviation: "GFK",
-      founded: 1988
-    },
-    {
-      name: "Rizespor",
-      city: "Rize",
-      lon: 40.5234,
-      lat: 41.0201,
-      color: "#007F5F",
-      colors: ["#007F5F", "#FFFFFF"],
-      overall: 69,
-      abbreviation: "RZ",
-      founded: 1953
-    },
-    {
-      name: "MKE Ankaragücü",
-      city: "Ankara",
-      lon: 32.8597,
-      lat: 39.9334,
-      color: "#0D47A1",
-      colors: ["#0D47A1", "#FFD600"],
-      overall: 71,
-      abbreviation: "AG",
-      founded: 1910
-    },
-    {
-      name: "Gençlerbirliği",
-      city: "Ankara",
-      lon: 32.8597,
-      lat: 39.9334,
-      color: "#D50000",
-      colors: ["#D50000", "#000000"],
-      overall: 69,
-      abbreviation: "GB",
-      founded: 1923
-    },
-    {
-      name: "Adana Demirspor",
-      city: "Adana",
-      lon: 35.3213,
-      lat: 37.0007,
-      color: "#0E4C92",
-      colors: ["#0E4C92", "#87CEEB"],
-      overall: 75,
-      abbreviation: "AD",
-      founded: 1940
-    },
-    {
-      name: "Bursaspor",
-      city: "Bursa",
-      lon: 29.061,
-      lat: 40.195,
-      color: "#008D4F",
-      colors: ["#008D4F", "#FFFFFF"],
-      overall: 72,
-      abbreviation: "BS",
-      founded: 1963
-    },
-    {
-      name: "Sivasspor",
-      city: "Sivas",
-      lon: 37.016,
-      lat: 39.7477,
-      color: "#E51C23",
-      colors: ["#E51C23", "#FFFFFF"],
-      overall: 70,
-      abbreviation: "SV",
-      founded: 1967
-    }
+    // 2025-26 Süper Lig (18 takım)
+    { name: "Galatasaray", city: "Istanbul", lon: 28.965, lat: 41.02, color: "#A3262A", colors: ["#F4C10F", "#A3262A"], overall: 85, abbreviation: "GS", founded: 1905 },
+    { name: "Fenerbahçe", city: "Istanbul", lon: 29.0634, lat: 41.0214, color: "#041E42", colors: ["#FEE715", "#041E42"], overall: 79, abbreviation: "FB", founded: 1907 },
+    { name: "Beşiktaş", city: "Istanbul", lon: 29.01, lat: 41.039, color: "#000000", colors: ["#000000", "#FFFFFF"], overall: 78, abbreviation: "BJK", founded: 1903 },
+    { name: "Trabzonspor", city: "Trabzon", lon: 39.7168, lat: 41.0031, color: "#7C162E", colors: ["#7C162E", "#64B5F6"], overall: 77, abbreviation: "TS", founded: 1967 },
+    { name: "Samsunspor", city: "Samsun", lon: 36.33, lat: 41.2928, color: "#FF0000", colors: ["#FF0000", "#FFFFFF"], overall: 75, abbreviation: "SS", founded: 1965 },
+    { name: "TÜMOSAN Konyaspor", city: "Konya", lon: 32.4846, lat: 37.8746, color: "#0B6E4F", colors: ["#0B6E4F", "#FFFFFF"], overall: 74, abbreviation: "KN", founded: 1922 },
+    { name: "Kayserispor", city: "Kayseri", lon: 35.4853, lat: 38.7348, color: "#D32F2F", colors: ["#D32F2F", "#FBC02D"], overall: 71, abbreviation: "KY", founded: 1966 },
+    { name: "Onvo Antalyaspor", city: "Antalya", lon: 30.7133, lat: 36.8969, color: "#D50000", colors: ["#D50000", "#FFFFFF"], overall: 71, abbreviation: "AT", founded: 1966 },
+    { name: "RAMS Başakşehir", city: "Istanbul", lon: 28.8076, lat: 41.0931, color: "#1B3A68", colors: ["#1B3A68", "#FF6F00"], overall: 76, abbreviation: "BŞ", founded: 1990 },
+    { name: "Kasımpaşa", city: "Istanbul", lon: 28.974, lat: 41.044, color: "#0046AD", colors: ["#0046AD", "#FFFFFF"], overall: 70, abbreviation: "KB", founded: 1921 },
+    { name: "Solwie Energy Fatih Karagümrük", city: "Istanbul", lon: 28.955, lat: 41.022, color: "#000000", colors: ["#000000", "#FF0000"], overall: 69, abbreviation: "KG", founded: 1926 },
+    { name: "Gaziantep FK", city: "Gaziantep", lon: 37.3792, lat: 37.0662, color: "#C62828", colors: ["#C62828", "#000000"], overall: 70, abbreviation: "GFK", founded: 1988 },
+    { name: "Çaykur Rizespor", city: "Rize", lon: 40.5234, lat: 41.0201, color: "#007F5F", colors: ["#007F5F", "#FFFFFF"], overall: 69, abbreviation: "RZ", founded: 1953 },
+    { name: "Gençlerbirliği", city: "Ankara", lon: 32.8597, lat: 39.9334, color: "#D50000", colors: ["#D50000", "#000000"], overall: 69, abbreviation: "GB", founded: 1923 },
+    { name: "Eyüpspor", city: "Istanbul", lon: 28.94, lat: 41.06, color: "#5E3A8E", colors: ["#5E3A8E", "#F4C10F"], overall: 70, abbreviation: "EY", founded: 1919 },
+    { name: "Göztepe", city: "Izmir", lon: 27.138, lat: 38.423, color: "#D90429", colors: ["#F7D417", "#D90429"], overall: 72, abbreviation: "GZ", founded: 1925 },
+    { name: "Kocaelispor", city: "Kocaeli", lon: 29.919, lat: 40.765, color: "#006A4E", colors: ["#006A4E", "#000000"], overall: 70, abbreviation: "KO", founded: 1966 },
+    { name: "Corendon Alanyaspor", city: "Antalya", lon: 31.995, lat: 36.543, color: "#F58220", colors: ["#F58220", "#16A34A"], overall: 70, abbreviation: "AL", founded: 1948 }
   ],
   Italy: [
     {

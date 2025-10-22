@@ -131,6 +131,22 @@ export const DIRECTIONS: Direction[] = [
   "NW"
 ]
 
+const getCountryMaxTeams = (country: CountryKey): number => {
+  switch (country) {
+    case "England":
+    case "Italy":
+    case "Spain":
+      return 20
+    case "France":
+    case "Germany":
+    case "Portugal":
+    case "Netherlands":
+    case "Turkey":
+    default:
+      return 18
+  }
+}
+
 export const useGameStore = create<GameState>((set, get) => ({
   selectedCountry: "Turkey" as CountryKey,
   numTeams: 8,
@@ -149,9 +165,13 @@ export const useGameStore = create<GameState>((set, get) => ({
   frozenSnapshotIndex: undefined,
   previewFromTeamId: undefined,
   setSeed: (seed: string) => set({ seed }),
-  setCountry: (c: CountryKey) => set({ selectedCountry: c }),
+  setCountry: (c: CountryKey) => set((state) => {
+    const max = getCountryMaxTeams(c)
+    const clamped = Math.max(2, Math.min(max, state.numTeams))
+    return { selectedCountry: c, numTeams: clamped }
+  }),
   setNumTeams: (n: number) =>
-    set({ numTeams: Math.max(2, Math.min(25, Math.floor(n))) }),
+    set((state) => ({ numTeams: Math.max(2, Math.min(getCountryMaxTeams(state.selectedCountry), Math.floor(n))) })),
   setMapColoring: (coloring: "solid" | "striped") =>
     set({ mapColoring: coloring }),
   setTeamsAndCells: (teamsIn: Team[], cellsIn: Cell[]) =>
