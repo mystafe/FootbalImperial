@@ -15,8 +15,8 @@ export interface Club {
 export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
   Turkey: [
     // 2025-26 Süper Lig (18 takım)
-    { name: "Galatasaray", city: "Istanbul", lon: 28.965, lat: 41.02, color: "#A3262A", colors: ["#F4C10F", "#A3262A"], overall: 85, abbreviation: "GS", founded: 1905 },
-    { name: "Fenerbahçe", city: "Istanbul", lon: 29.0634, lat: 41.0214, color: "#041E42", colors: ["#FEE715", "#041E42"], overall: 79, abbreviation: "FB", founded: 1907 },
+    { name: "Galatasaray", city: "Istanbul", lon: 28.965, lat: 41.02, color: "#A90432", colors: ["#A90432", "#FDB912"], overall: 88, abbreviation: "GS", founded: 1905 },
+    { name: "Fenerbahçe", city: "Istanbul", lon: 29.0634, lat: 41.0214, color: "#041E42", colors: ["#FEE715", "#041E42"], overall: 76, abbreviation: "FB", founded: 1907 },
     { name: "Beşiktaş", city: "Istanbul", lon: 29.01, lat: 41.039, color: "#000000", colors: ["#000000", "#FFFFFF"], overall: 78, abbreviation: "BJK", founded: 1903 },
     { name: "Trabzonspor", city: "Trabzon", lon: 39.7168, lat: 41.0031, color: "#7C162E", colors: ["#7C162E", "#64B5F6"], overall: 77, abbreviation: "TS", founded: 1967 },
     { name: "Samsunspor", city: "Samsun", lon: 36.33, lat: 41.2928, color: "#FF0000", colors: ["#FF0000", "#FFFFFF"], overall: 75, abbreviation: "SS", founded: 1965 },
@@ -257,46 +257,41 @@ export const COUNTRY_CLUBS: Record<CountryKey, Club[]> = {
     }
   ],
   Germany: [
-    { name: "Bayern", city: "Munich", lon: 11.582, lat: 48.1351 },
-    { name: "Dortmund", city: "Dortmund", lon: 7.4653, lat: 51.5136 },
-    { name: "Schalke", city: "Gelsenkirchen", lon: 7.081, lat: 51.5177 },
-    { name: "RB Leipzig", city: "Leipzig", lon: 12.3731, lat: 51.3397 },
-    { name: "Leverkusen", city: "Leverkusen", lon: 6.984, lat: 51.0303 },
-    { name: "Frankfurt", city: "Frankfurt", lon: 8.6821, lat: 50.1109 },
-    { name: "Hertha", city: "Berlin", lon: 13.405, lat: 52.52 },
-    { name: "Hamburg", city: "Hamburg", lon: 9.9937, lat: 53.5511 }
+    { name: "Bayern", city: "Munich", lon: 11.582, lat: 48.1351, colors: ["#DC052D", "#FFFFFF"], abbreviation: "FCB" },
+    { name: "Dortmund", city: "Dortmund", lon: 7.4653, lat: 51.5136, colors: ["#FDE100", "#000000"], abbreviation: "BVB" },
+    { name: "Schalke", city: "Gelsenkirchen", lon: 7.081, lat: 51.5177, colors: ["#1B449C", "#FFFFFF"], abbreviation: "S04" },
+    { name: "RB Leipzig", city: "Leipzig", lon: 12.3731, lat: 51.3397, colors: ["#FFFFFF", "#E41B17"], abbreviation: "RBL" },
+    { name: "Leverkusen", city: "Leverkusen", lon: 6.984, lat: 51.0303, colors: ["#E32219", "#000000"], abbreviation: "B04" },
+    { name: "Frankfurt", city: "Frankfurt", lon: 8.6821, lat: 50.1109, colors: ["#E1000F", "#000000"], abbreviation: "SGE" },
+    { name: "Hertha", city: "Berlin", lon: 13.405, lat: 52.52, colors: ["#004C9B", "#FFFFFF"], abbreviation: "BSC" },
+    { name: "Hamburg", city: "Hamburg", lon: 9.9937, lat: 53.5511, colors: ["#0A3B8A", "#FFFFFF"], abbreviation: "HSV" }
   ],
   Portugal: [
-    { name: "Benfica", city: "Lisbon", lon: -9.1427, lat: 38.7369 },
-    { name: "Sporting", city: "Lisbon", lon: -9.1427, lat: 38.7369 },
-    { name: "Porto", city: "Porto", lon: -8.6291, lat: 41.1579 },
-    { name: "Braga", city: "Braga", lon: -8.4292, lat: 41.5454 },
-    { name: "Guimarães", city: "Guimarães", lon: -8.29, lat: 41.4442 },
-    { name: "Boavista", city: "Porto", lon: -8.6291, lat: 41.1579 }
+    { name: "Benfica", city: "Lisbon", lon: -9.1427, lat: 38.7369, colors: ["#E32636", "#FFFFFF"], abbreviation: "SLB" },
+    { name: "Sporting", city: "Lisbon", lon: -9.1427, lat: 38.7369, colors: ["#00A650", "#FFFFFF"], abbreviation: "SCP" },
+    { name: "Porto", city: "Porto", lon: -8.6291, lat: 41.1579, colors: ["#0033A0", "#FFFFFF"], abbreviation: "FCP" },
+    { name: "Braga", city: "Braga", lon: -8.4292, lat: 41.5454, colors: ["#D00023", "#FFFFFF"], abbreviation: "SCB" },
+    { name: "Guimarães", city: "Guimarães", lon: -8.29, lat: 41.4442, colors: ["#FFFFFF", "#000000"], abbreviation: "VSC" },
+    { name: "Boavista", city: "Porto", lon: -8.6291, lat: 41.1579, colors: ["#000000", "#FFFFFF"], abbreviation: "BFC" }
   ],
   Netherlands: [
-    { name: "Ajax", city: "Amsterdam", lon: 4.9041, lat: 52.3676 },
-    { name: "PSV", city: "Eindhoven", lon: 5.4697, lat: 51.4416 },
-    { name: "Feyenoord", city: "Rotterdam", lon: 4.4777, lat: 51.9244 },
-    { name: "AZ Alkmaar", city: "Alkmaar", lon: 4.7485, lat: 52.6319 },
-    { name: "Utrecht", city: "Utrecht", lon: 5.1214, lat: 52.0907 },
-    { name: "Heerenveen", city: "Heerenveen", lon: 5.9185, lat: 52.959 },
-    { name: "Groningen", city: "Groningen", lon: 6.5665, lat: 53.2194 },
-    { name: "Twente", city: "Enschede", lon: 6.8958, lat: 52.2215 }
+    { name: "Ajax", city: "Amsterdam", lon: 4.9041, lat: 52.3676, colors: ["#DA291C", "#FFFFFF"], abbreviation: "AJA" },
+    { name: "PSV", city: "Eindhoven", lon: 5.4697, lat: 51.4416, colors: ["#D71920", "#FFFFFF"], abbreviation: "PSV" },
+    { name: "Feyenoord", city: "Rotterdam", lon: 4.4777, lat: 51.9244, colors: ["#E0001F", "#FFFFFF"], abbreviation: "FEY" },
+    { name: "AZ Alkmaar", city: "Alkmaar", lon: 4.7485, lat: 52.6319, colors: ["#E40E2D", "#000000"], abbreviation: "AZ" },
+    { name: "Utrecht", city: "Utrecht", lon: 5.1214, lat: 52.0907, colors: ["#D81921", "#1F6FB2"], abbreviation: "UTR" },
+    { name: "Heerenveen", city: "Heerenveen", lon: 5.9185, lat: 52.959, colors: ["#1F6FB2", "#FFFFFF"], abbreviation: "HEE" },
+    { name: "Groningen", city: "Groningen", lon: 6.5665, lat: 53.2194, colors: ["#009A49", "#FFFFFF"], abbreviation: "GRO" },
+    { name: "Twente", city: "Enschede", lon: 6.8958, lat: 52.2215, colors: ["#D71920", "#FFFFFF"], abbreviation: "TWE" }
   ],
   England: [
-    {
-      name: "Manchester United",
-      city: "Manchester",
-      lon: -2.2426,
-      lat: 53.4808
-    },
-    { name: "Manchester City", city: "Manchester", lon: -2.2426, lat: 53.4808 },
-    { name: "Liverpool", city: "Liverpool", lon: -2.9779, lat: 53.4084 },
-    { name: "Everton", city: "Liverpool", lon: -2.9916, lat: 53.4388 },
-    { name: "Chelsea", city: "London", lon: -0.1276, lat: 51.5074 },
-    { name: "Arsenal", city: "London", lon: -0.1276, lat: 51.5074 },
-    { name: "Tottenham", city: "London", lon: -0.1276, lat: 51.5074 },
-    { name: "Newcastle", city: "Newcastle", lon: -1.6178, lat: 54.9783 }
+    { name: "Manchester United", city: "Manchester", lon: -2.2426, lat: 53.4808, colors: ["#DA291C", "#FFE500"], abbreviation: "MUN" },
+    { name: "Manchester City", city: "Manchester", lon: -2.2426, lat: 53.4808, colors: ["#6CABDD", "#1C2C5B"], abbreviation: "MCI" },
+    { name: "Liverpool", city: "Liverpool", lon: -2.9779, lat: 53.4084, colors: ["#C8102E", "#00B2A9"], abbreviation: "LIV" },
+    { name: "Everton", city: "Liverpool", lon: -2.9916, lat: 53.4388, colors: ["#003399", "#FFFFFF"], abbreviation: "EVE" },
+    { name: "Chelsea", city: "London", lon: -0.1276, lat: 51.5074, colors: ["#034694", "#FFFFFF"], abbreviation: "CHE" },
+    { name: "Arsenal", city: "London", lon: -0.1276, lat: 51.5074, colors: ["#EF0107", "#FFFFFF"], abbreviation: "ARS" },
+    { name: "Tottenham", city: "London", lon: -0.1276, lat: 51.5074, colors: ["#001C58", "#FFFFFF"], abbreviation: "TOT" },
+    { name: "Newcastle", city: "Newcastle", lon: -1.6178, lat: 54.9783, colors: ["#241F20", "#FFFFFF"], abbreviation: "NEW" }
   ]
 }

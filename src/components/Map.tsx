@@ -43,9 +43,15 @@ interface MapViewProps {
   attackedTeam?: string | null
   attackedTeamId?: number | null
   fastMode?: boolean
+  animationSpeed?: "normal" | "fast" | "none"
+  selectionMode?: "normal" | "fast" | "instant" | "manual" | "random"
   manualMode?: boolean
   manualMapping?: Record<number, number>
   onCellClick?: (cellId: number) => void
+  targetSelectMode?: boolean
+  onTargetSelect?: (cellId: number) => void
+  attackerSelectMode?: boolean
+  onAttackerSelect?: (teamId: number) => void
 }
 
 export default function MapView({
@@ -54,13 +60,20 @@ export default function MapView({
   attackedTeam: _attackedTeam = null,
   attackedTeamId = null,
   fastMode = false,
+  animationSpeed = "normal",
+  selectionMode = "normal",
   manualMode = false,
   manualMapping,
-  onCellClick
+  onCellClick,
+  targetSelectMode = false,
+  onTargetSelect,
+  attackerSelectMode = false,
+  onAttackerSelect
 }: MapViewProps) {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
   const mapColoring = useGameStore((s) => s.mapColoring)
+  const mapTheme = useGameStore((s) => (s as any).mapTheme) || 'classic'
   const seed = useGameStore((s) => s.seed)
   const setTeamsAndCells = useGameStore((s) => s.setTeamsAndCells)
   const snapIdx = useGameStore((s) => (s as { frozenSnapshotIndex?: number }).frozenSnapshotIndex)
@@ -91,7 +104,7 @@ export default function MapView({
     if (rotatingArrowAngle == null) return
     
     const startTime = Date.now()
-    const duration = fastMode ? 400 : 2000
+    const duration = animationSpeed === 'none' ? 1 : (animationSpeed === 'fast' ? 400 : 2000)
     const spins = fastMode ? 1 : 3
     const targetRotation = rotatingArrowAngle + 360 * spins
     
@@ -111,7 +124,7 @@ export default function MapView({
     }
     
     requestAnimationFrame(animate)
-  }, [rotatingArrowAngle, fastMode])
+  }, [rotatingArrowAngle, fastMode, animationSpeed])
 
   useEffect(() => {
     const onResize = () => {
@@ -445,6 +458,30 @@ export default function MapView({
             // lookup dual colors
             const club = owner ? (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (owner as { name: string }).name) : undefined
             const dual = mapColoring === "striped" && club?.colors
+            
+            // Apply theme-based visual effects
+            const getThemeEffect = (baseColor: string) => {
+              switch (mapTheme) {
+                case 'neon':
+                  return `drop-shadow(0 0 8px ${baseColor}) drop-shadow(0 0 16px ${baseColor}40)`
+                case 'ocean':
+                  return `filter: hue-rotate(180deg) saturate(1.2)`
+                case 'fire':
+                  return `filter: hue-rotate(30deg) saturate(1.5) brightness(1.1)`
+                case 'forest':
+                  return `filter: hue-rotate(120deg) saturate(0.8) brightness(0.9)`
+                case 'modern':
+                  return `filter: contrast(1.2) saturate(1.1)`
+                case 'retro':
+                  return `filter: sepia(0.3) saturate(1.2) contrast(1.1)`
+                case 'minimal':
+                  return `filter: grayscale(0.3) contrast(1.1)`
+                case 'vibrant':
+                  return `filter: saturate(1.5) contrast(1.2) brightness(1.1)`
+                default:
+                  return ''
+              }
+            }
             // Manual pre-phase: immediate provisional coloring from manualMapping
             const prePhase = manualMode && storeCells.length === 0
             const mappedIdx = prePhase ? (manualMapping ? (manualMapping as Record<number, number>)[i] : undefined) : undefined
@@ -478,12 +515,38 @@ export default function MapView({
                   strokeOpacity={0.8}
                   strokeLinejoin="round"
                   strokeLinecap="round"
-                  style={{ cursor: manualMode && storeCells.length === 0 ? 'pointer' as const : undefined }}
+                  style={{ 
+                    cursor: (manualMode && storeCells.length === 0) || targetSelectMode || attackerSelectMode ? 'pointer' as const : undefined,
+                    filter: mapTheme !== 'classic' ? getThemeEffect(
+                      prePhase
+                        ? (preClub ? ((preClub.colors && preClub.colors.length > 0 ? preClub.colors[0] : preClub.color) || BALANCE.neutrals.color) : BALANCE.neutrals.color)
+                        : (isNeutral
+                            ? BALANCE.neutrals.color
+                            : dual
+                            ? `url(#team-stripe-${(owner as { id: number })?.id})`
+                            : (
+                                // Solid: prefer club primary color to avoid mismatches (e.g., Galatasaray)
+                                (club?.colors && club.colors.length > 0
+                                  ? club.colors[0]
+                                  : ((owner as { color?: string })?.color || "#ddd")
+                                )
+                              )
+                          )
+                    ) : undefined
+                  }}
                   onClick={() => {
-                    if (manualMode && typeof (i) === 'number') {
+                    if (targetSelectMode && onTargetSelect) {
+                      onTargetSelect((cell as { id: number }).id)
+                      return
+                    }
+                    if (attackerSelectMode && onAttackerSelect && owner) {
+                      onAttackerSelect((owner as { id: number }).id)
+                      return
+                    }
+                    if (manualMode) {
                       // When manualMode active, click communicates cell index to parent
                       // Use provided onCellClick if available
-                      if (onCellClick) onCellClick(i)
+                      if (onCellClick) onCellClick((cell as { id: number }).id)
                     }
                   }}
                   initial={{ opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }}
@@ -501,9 +564,9 @@ export default function MapView({
                       : { opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }
                   }
                   transition={{ 
-                    opacity: { duration: fastMode ? 0.15 : 0.6, ease: "easeInOut" },
-                    filter: { duration: fastMode ? 0.18 : 0.8, ease: "easeInOut" },
-                    scale: { duration: fastMode ? 0.18 : 0.8, ease: "easeInOut" }
+                    opacity: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.15 : 0.6), ease: "easeInOut" },
+                    filter: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.18 : 0.8), ease: "easeInOut" },
+                    scale: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.18 : 0.8), ease: "easeInOut" }
                   }}
                 >
                   <title>{`${(owner as { name?: string })?.name ?? (isNeutral ? 'Neutral' : 'Team')} • cell ${(cell as { id: number }).id}`}</title>
@@ -1218,12 +1281,12 @@ export default function MapView({
                   strokeWidth: [0, 2, 8, 16, 12, 0]
                 }}
                   transition={{ 
-                  duration: fastMode ? 0.4 : 3.0, 
+                  duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 3.0), 
                   ease: "easeOut",
-                  x2: { duration: fastMode ? 0.4 : 3.0, ease: "easeOut" },
-                  y2: { duration: fastMode ? 0.4 : 3.0, ease: "easeOut" },
-                  opacity: { duration: fastMode ? 0.4 : 3.0, times: [0, 0.2, 0.4, 0.7, 0.9, 1] },
-                  strokeWidth: { duration: fastMode ? 0.4 : 3.0, times: [0, 0.1, 0.3, 0.6, 0.8, 1] }
+                  x2: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 3.0), ease: "easeOut" },
+                  y2: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 3.0), ease: "easeOut" },
+                  opacity: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 3.0), times: [0, 0.2, 0.4, 0.7, 0.9, 1] },
+                  strokeWidth: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 3.0), times: [0, 0.1, 0.3, 0.6, 0.8, 1] }
                 }}
               />
               
@@ -1246,7 +1309,7 @@ export default function MapView({
                       filter="url(#beamGlow)"
                       initial={{ r: 0, opacity: 1 }}
                       animate={{ r: [0, 50], opacity: [1, 0] }}
-                      transition={{ duration: fastMode ? 0.35 : 1.8, ease: "easeOut" }}
+                      transition={{ duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.35 : 1.8), ease: "easeOut" }}
                     />
                     <motion.circle
                       cx={targetX}
@@ -1257,7 +1320,7 @@ export default function MapView({
                       filter="url(#beamGlow)"
                       initial={{ r: 0, opacity: 0 }}
                       animate={{ r: [0, 30, 0], opacity: [0, 0.9, 0] }}
-                      transition={{ duration: fastMode ? 0.4 : 2.2, ease: "easeOut" }}
+                      transition={{ duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 2.2), ease: "easeOut" }}
                     />
                   </>
                 )
@@ -1277,7 +1340,7 @@ export default function MapView({
           winnerIndex={teamSpinnerProps.winnerIndex ?? 0}
           fullNames={teamSpinnerProps.fullNames ?? []}
           onDone={teamSpinnerProps.onDone ?? (() => {})}
-          durationMs={fastMode ? 600 : 3000}
+          durationMs={animationSpeed === 'none' || selectionMode === 'instant' ? 0 : ((selectionMode === 'fast' || animationSpeed === 'fast') ? 600 : 3000)}
         />
       )}
       

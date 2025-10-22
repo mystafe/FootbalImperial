@@ -1,11 +1,11 @@
 import "./App.css"
 import { useEffect, useMemo, useRef, useState } from "react"
 import MapView from "./components/Map"
-import { useGameStore, DIRECTIONS, COUNTRIES, type Direction } from "./store/game"
+import { useGameStore, COUNTRIES, type Direction } from "./store/game"
 import { createRng, weightedChoice } from "./lib/random"
-import { playCapture, playClick } from "./lib/sound"
+import { playClick } from "./lib/sound"
 import { AnimatePresence, motion } from "framer-motion"
-import { loadConfig, saveConfig, type GameConfig } from "./config/game"
+import { loadConfig, saveConfig, loadLayouts, saveLayoutPreset, deleteLayoutPreset, type GameConfig, type SavedLayout } from "./config/game"
 import { COUNTRY_CLUBS } from "./data/clubs"
 
 function App() {
@@ -14,8 +14,6 @@ function App() {
   const cells = useGameStore((s) => s.cells)
   const history = useGameStore((s) => s.history)
   const turn = useGameStore((s) => s.turn)
-  const applyAttack = useGameStore((s) => s.applyAttack)
-  const playAutoTurn = useGameStore((s) => s.playAutoTurn)
   const gameStarted = useGameStore(
     (s) => (s as unknown as { gameStarted: boolean }).gameStarted
   )
@@ -31,6 +29,76 @@ function App() {
 
   // Config state
   const [config, setConfig] = useState<GameConfig>(loadConfig())
+  const manualEnabled = useMemo(() => config.teamSelectionMode === 'manual' || config.teamSelectionMode === 'layout', [config.teamSelectionMode])
+  const [savedLayouts, setSavedLayouts] = useState<SavedLayout[]>(loadLayouts())
+  const availableLayouts = useMemo(() => savedLayouts.filter(l => l.country === selectedCountry && l.numTeams === numTeams), [savedLayouts, selectedCountry, numTeams])
+  const [saveName, setSaveName] = useState<string>("")
+  const [layoutSaved, setLayoutSaved] = useState<boolean>(false)
+  const m = useMemo(() => ({
+    tr: {
+      country: 'Ülke Seçimi', teams: 'Takım Sayısı', mapLook: 'Harita Görünümü', striped: 'Şeritli Desenler', solid: 'Düz Renkler',
+      classic: 'Klasik', modern: 'Modern', retro: 'Retro', minimal: 'Minimal', vibrant: 'Canlı',
+      themeClassic: 'Klasik', themeNeon: 'Neon', themeOcean: 'Okyanus', themeFire: 'Ateş', themeForest: 'Orman',
+      preset: 'Hazır Oyun Modu', teamSelections: 'Takım Seçimleri', default: 'Default', manual: 'Manuel',
+      selection: 'Saldıran Takım Seçimi', selectionManualHint: '⚔️ Haritadan saldıran takımı seçin',
+      direction: 'Saldırılan Takım Seçimi', directionManualHint: '🎯 Haritadan savunulacak takımı seçin',
+      result: 'Mücadele Sonucu', anim: 'Animasyon Hızı',
+      dirOptDefaultWheel: 'Default Çark', dirOptFastWheel: 'Hızlı Çark', dirOptInstant: 'Anlık Seçim', rand: 'Rastgele',
+      normal: 'Normal', fast: 'Hızlı', instant: 'Anlık', none: 'Animasyonsuz',
+      lang: 'Dil', turkish: 'Türkçe', english: 'English',
+      manualPlacement: 'Manuel yerleşim', picked: 'Seçilenler', clickToPlace: 'Seçtiğiniz takımın merkezini haritada tıklayın',
+      placementDone: 'Yerleşim tamamlandı', layoutName: 'Düzen adı', save: 'Kaydet',
+      start: 'Oyunu Başlat', attackerPick: 'Atak Yapan Takımı Seç',
+      resultReal: 'Gerçekçi', resultRandom: 'Rastgele', resultManual: 'Manuel'
+      ,turn: 'Tur', heroDesc: 'Takımlarınızla dünyayı fethedin. Strateji, şans ve futbol tutkunuzla imparatorluğunuzu kurun.',
+      strategicWars: 'Stratejik Savaşlar', luckSkill: 'Şans ve Beceri', buildEmpire: 'İmparatorluk Kurun',
+      strategicWarsDesc: 'Strateji, şans ve futbol tutkunuzla imparatorluğunuzu kurun.',
+      luckSkillDesc: 'Hem şans hem de futbol bilginizle kazanın. Her hamle yeni bir macera.',
+      buildEmpireDesc: 'En büyük futbol imparatorluğunu kurun ve dünyayı tek çatı altında toplayın.',
+      historyStats: 'Geçmiş & İstatistikler', lastMoves: 'Son Hamleler', noMovesYet: 'Henüz hamle yok.',
+      restart: 'Yeniden Başlat', presetNormal: 'Normal', presetFast: 'Hızlı', presetInstant: 'Anlık', presetManual: 'Manuel',
+      teamSelecting: 'Takım seçiliyor...', watchWheel: 'Haritada dönen çarkı izleyin', teamWon: 'kazandı!', vs: '→',
+      attackingTeam: 'Saldıran Takım', defendingTeam: 'Saldırılan Takım',
+      directionSelecting: 'Yön belirleniyor...', watchArrow: 'Haritada dönen oku izleyin',
+      battleStart: 'Mücadeleyi Başlat', gameReady: 'Oyun Hazır', teamPlaced: 'yerleştirildi',
+      placementComplete: 'Yerleşim Tamamlandı', layoutSaved: 'Düzen kaydedildi',
+      attackerWins: 'Saldıran Kazansın', defenderWins: 'Savunan Kazansın',
+      gameOver: 'Oyun Bitti', winner: 'Kazanan', delete: 'Sil',
+      animNormal: 'Normal', animFast: 'Hızlı', animNone: 'Animasyonsuz', randomizeAll: 'Rastgele Ayarla'
+    },
+    en: {
+      country: 'Country', teams: 'Team Count', mapLook: 'Map Look', striped: 'Striped', solid: 'Solid',
+      classic: 'Classic', modern: 'Modern', retro: 'Retro', minimal: 'Minimal', vibrant: 'Vibrant',
+      themeClassic: 'Classic', themeNeon: 'Neon', themeOcean: 'Ocean', themeFire: 'Fire', themeForest: 'Forest',
+      preset: 'Preset Mode', teamSelections: 'Team Selections', default: 'Default', manual: 'Manual',
+      selection: 'Attacker Selection', selectionManualHint: '⚔️ Pick an attacking team on the map',
+      direction: 'Defender Selection', directionManualHint: '🎯 Pick a defending team on the map',
+      result: 'Battle Result', anim: 'Animation Speed',
+      dirOptDefaultWheel: 'Default Wheel', dirOptFastWheel: 'Fast Wheel', dirOptInstant: 'Instant Pick', rand: 'Random',
+      normal: 'Normal', fast: 'Fast', instant: 'Instant', none: 'No Animations',
+      lang: 'Language', turkish: 'Turkish', english: 'English',
+      manualPlacement: 'Manual placement', picked: 'Picked', clickToPlace: 'Click a cell on map to place',
+      placementDone: 'Placement complete', layoutName: 'Layout name', save: 'Save',
+      start: 'Start Game', attackerPick: 'Pick Attacking Team',
+      resultReal: 'Realistic', resultRandom: 'Random', resultManual: 'Manual'
+      ,turn: 'Turn', heroDesc: 'Conquer the world with your teams. Build your empire with strategy, luck, and football passion.',
+      strategicWars: 'Strategic Wars', luckSkill: 'Luck and Skill', buildEmpire: 'Build Empire',
+      strategicWarsDesc: 'Build your empire with strategy, luck, and football passion.',
+      luckSkillDesc: 'Win with both luck and your football knowledge. Every move is a new adventure.',
+      buildEmpireDesc: 'Build the greatest football empire and unite the world under one roof.',
+      historyStats: 'History & Statistics', lastMoves: 'Last Moves', noMovesYet: 'No moves yet.',
+      restart: 'Restart', presetNormal: 'Normal', presetFast: 'Fast', presetInstant: 'Instant', presetManual: 'Manual',
+      teamSelecting: 'Selecting team...', watchWheel: 'Watch the spinning wheel on the map', teamWon: 'won!', vs: '→',
+      attackingTeam: 'Attacking Team', defendingTeam: 'Defending Team',
+      directionSelecting: 'Determining direction...', watchArrow: 'Watch the spinning arrow on the map',
+      battleStart: 'Start Battle', gameReady: 'Game Ready', teamPlaced: 'placed',
+      placementComplete: 'Placement Complete', layoutSaved: 'Layout saved',
+      attackerWins: 'Attacker Wins', defenderWins: 'Defender Wins',
+      gameOver: 'Game Over', winner: 'Winner', delete: 'Delete',
+      animNormal: 'Normal', animFast: 'Fast', animNone: 'No Animations', randomizeAll: 'Randomize All'
+    }
+  }), [])
+  const t = (k: keyof typeof m['tr']) => (m as any)[config.language || 'en'][k]
   const setPreviewTarget = useGameStore((s) => s.setPreviewTarget)
   const resolveTarget = useGameStore((s) => s.resolveTarget)
   const setSuppressLastOverlay = useGameStore(
@@ -135,10 +203,10 @@ function App() {
     const aOvr = attacker?.overall ?? 75
     const dOvr = defender?.overall ?? 75
     const winnerName = h.attackerWon ? aName : defender?.name ?? dName
-    const msg = `${aName} (${aOvr}) → ${dName} (${dOvr}) — ${winnerName} kazandı!`
+    const msg = `${aName} (${aOvr}) ${t('vs')} ${dName} (${dOvr}) — ${winnerName} ${t('teamWon')}`
     setToast(msg)
-    const t = setTimeout(() => setToast(null), 6500)
-    return () => clearTimeout(t)
+    const timeout = setTimeout(() => setToast(null), 6500)
+    return () => clearTimeout(timeout)
   }, [history, teams])
 
   // Find potential defender when direction is chosen
@@ -326,25 +394,25 @@ function App() {
             <div className="relative z-10">
               <div className="mb-4">
                 <span className="inline-block px-4 py-2 bg-emerald-500/20 border border-emerald-400/30 rounded-full text-emerald-300 text-sm font-medium backdrop-blur-sm">
-                  🏆 Stratejik Futbol Savaşları
+                  🏆 {config.language==='tr' ? 'Stratejik Futbol Savaşları' : 'Strategic Football Battles'}
                 </span>
               </div>
               <div className="relative inline-block group">
                 <h1 className="text-6xl md:text-7xl font-black tracking-tight animate-fade-in-up mb-4">
-                  <span className="text-white">Futbol</span>
+                  <span className="text-white">{config.language==='tr' ? 'Futbol' : 'Football'}</span>
                   <span className="block text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-blue-400 to-purple-400">
-                    Emperyalizmi
+                    {config.language==='tr' ? 'Emperyalizmi' : 'Empire'}
                   </span>
           </h1>
                 {/* Version Tooltip */}
                 <div className="absolute -top-8 -right-12 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:-translate-y-1 z-50">
                   <div className="bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-bold rounded-lg px-4 py-2 text-base shadow-2xl border-2 border-white/20 whitespace-nowrap">
-                    v0.9.2
+                    v0.10.7
                   </div>
                 </div>
               </div>
               <p className="text-xl text-slate-300 max-w-2xl mx-auto leading-relaxed animate-fade-in-up">
-                Takımlarınızla dünyayı fethedin. Strateji, şans ve futbol tutkunuzla imparatorluğunuzu kurun.
+                {t('heroDesc')}
               </p>
             </div>
         </header>
@@ -356,14 +424,14 @@ function App() {
             <div className="mb-6 text-center">
               <div className="inline-flex items-center gap-3 px-4 py-2 bg-gradient-to-r from-emerald-500/20 to-blue-500/20 border border-emerald-400/30 rounded-full backdrop-blur-sm mb-4">
                 <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></div>
-                <span className="text-emerald-300 font-medium text-sm">Oyun Hazır</span>
+                <span className="text-emerald-300 font-medium text-sm">{t('gameReady')}</span>
                 <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
               </div>
               <h2 className="text-2xl font-bold text-white mb-2">
-                İmparatorluğunuzu Kurun
+                {config.language==='tr' ? 'İmparatorluğunuzu Kurun' : 'Build Your Empire'}
               </h2>
               <p className="text-slate-400 text-base">
-                Ayarları yapılandırın ve futbol dünyasında hüküm sürmeye başlayın
+                {config.language==='tr' ? 'Ayarları yapılandırın ve futbol dünyasında hüküm sürmeye başlayın' : 'Configure settings and start ruling the football world'}
               </p>
             </div>
 
@@ -379,7 +447,7 @@ function App() {
                   <div className="space-y-5">
                     <div className="group">
                       <label className="mb-2 block text-sm font-semibold text-emerald-300 uppercase tracking-wide">
-                        🌍 Ülke Seçimi
+                        🌍 {t('country')}
                   </label>
                   <select
                     value={selectedCountry}
@@ -398,7 +466,7 @@ function App() {
 
                     <div className="group">
                       <label className="mb-2 block text-sm font-semibold text-blue-300 uppercase tracking-wide">
-                        ⚽ Takım Sayısı
+                        ⚽ {t('teams')}
                   </label>
                   <input
                     type="number"
@@ -410,7 +478,81 @@ function App() {
                     }
                         className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 transition-all duration-200 backdrop-blur-sm hover:bg-slate-700/70"
                   />
-                      <p className="mt-2 text-xs text-slate-400">2-{leagueMax} arası takım seçebilirsiniz</p>
+                      <p className="mt-2 text-xs text-slate-400">2-{leagueMax}</p>
+                </div>
+
+                    <div className="group">
+                      <label className="mb-2 block text-sm font-semibold text-amber-300 uppercase tracking-wide">
+                        🧩 {t('teamSelections')}
+                      </label>
+                      <select
+                        value={config.teamSelectionMode === 'layout' ? `layout::${config.teamSelectionLayoutName || ''}` : config.teamSelectionMode}
+                        onChange={(e)=>{ 
+                          const val = e.target.value
+                          if (val.startsWith('layout::')) {
+                            const name = val.slice('layout::'.length)
+                            const newConfig = { ...config, teamSelectionMode: 'layout' as const, teamSelectionLayoutName: name }
+                            setConfig(newConfig); saveConfig(newConfig)
+                          } else {
+                            const newConfig = { ...config, teamSelectionMode: val as any, teamSelectionLayoutName: undefined }
+                            setConfig(newConfig); saveConfig(newConfig)
+                          }
+                        }}
+                        className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white"
+                      >
+                        <option value="default">{t('default')}</option>
+                        <option value="manual">{t('manual')}</option>
+                        {availableLayouts.length > 0 && (
+                          <option disabled>──────────</option>
+                        )}
+                        {availableLayouts.map((l)=> (
+                          <option key={l.name} value={`layout::${l.name}`}>{l.name}</option>
+                        ))}
+                      </select>
+                      
+                      {/* Delete saved layouts */}
+                      {availableLayouts.length > 0 && (
+                        <div className="mt-3">
+                          <label className="mb-2 block text-xs font-semibold text-red-300 uppercase tracking-wide">
+                            🗑️ {t('delete')} {t('teamSelections')}
+                          </label>
+                          <div className="space-y-2">
+                            {availableLayouts.map((layout) => (
+                              <div key={layout.name} className="flex items-center justify-between bg-slate-800/50 rounded-lg p-2 border border-slate-600/30">
+                                <span className="text-sm text-slate-300">{layout.name}</span>
+                                <button
+                                  onClick={() => {
+                                    if (confirm(`${t('delete')} "${layout.name}"?`)) {
+                                      deleteLayoutPreset(layout.name)
+                                      setSavedLayouts(loadLayouts())
+                                      if (config.teamSelectionLayoutName === layout.name) {
+                                        const newConfig = { ...config, teamSelectionMode: 'default' as const, teamSelectionLayoutName: undefined }
+                                        setConfig(newConfig)
+                                        saveConfig(newConfig)
+                                      }
+                                    }
+                                  }}
+                                  className="text-red-400 hover:text-red-300 text-xs px-2 py-1 rounded border border-red-400/30 hover:bg-red-400/10 transition-colors"
+                                >
+                                  {t('delete')}
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="group">
+                      <label className="mb-2 block text-sm font-semibold text-indigo-300 uppercase tracking-wide">{t('lang')}</label>
+                      <select
+                        value={config.language}
+                        onChange={(e)=>{ const newConfig = { ...config, language: e.target.value as any }; setConfig(newConfig); saveConfig(newConfig) }}
+                        className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white"
+                      >
+                        <option value="tr">{t('turkish')}</option>
+                        <option value="en">{t('english')}</option>
+                      </select>
                 </div>
                   </div>
 
@@ -418,7 +560,7 @@ function App() {
                   <div className="space-y-5">
                     <div className="group">
                       <label className="mb-2 block text-sm font-semibold text-purple-300 uppercase tracking-wide">
-                        🎨 Harita Görünümü
+                        🎨 {t('mapLook')}
                   </label>
                   <select
                     value={mapColoring}
@@ -427,44 +569,125 @@ function App() {
                     }
                         className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20 transition-all duration-200 backdrop-blur-sm hover:bg-slate-700/70"
                   >
-                    <option value="striped">Şeritli Desenler</option>
-                    <option value="solid">Düz Renkler</option>
+                    <option value="striped">🎨 {t('striped')}</option>
+                    <option value="solid">🎯 {t('solid')}</option>
+                    <option value="classic">🏛️ {t('classic')}</option>
+                    <option value="modern">✨ {t('modern')}</option>
+                    <option value="retro">📺 {t('retro')}</option>
+                    <option value="minimal">⚪ {t('minimal')}</option>
+                    <option value="vibrant">🌈 {t('vibrant')}</option>
                   </select>
+                  
                 </div>
 
-                    <div className="group">
-                      <label className="mb-2 block text-sm font-semibold text-amber-300 uppercase tracking-wide">
-                        ⚙️ Oyun Modu
-                  </label>
-                  <select
-                    value={
-                      config.fastMode
-                        ? "fast"
-                        : config.manualMode
-                        ? "manual"
-                        : "normal"
-                    }
-                    onChange={(e) => {
-                      const newConfig = {
-                        ...config,
-                        fastMode: e.target.value === "fast",
-                        manualMode: e.target.value === "manual"
-                      }
-                      setConfig(newConfig)
-                      saveConfig(newConfig)
-                    }}
+                  <div className="group space-y-3">
+                    <div>
+                      <label className="mb-2 block text-sm font-semibold text-amber-300 uppercase tracking-wide">⚙️ {t('preset')}</label>
+                      <select
+                        value={config.presetMode}
+                        onChange={(e) => {
+                          const preset = e.target.value as GameConfig["presetMode"]
+                          const presets: Record<string, Partial<GameConfig>> = {
+                            normal: { selectionMode: 'normal', directionMode: 'normal', resultMode: 'normal', animationSpeed: 'normal', presetMode: 'normal', teamSelectionMode: 'default' },
+                            fast: { selectionMode: 'fast', directionMode: 'fast', resultMode: 'fast', animationSpeed: 'fast', presetMode: 'fast', teamSelectionMode: 'default' },
+                            instant: { selectionMode: 'instant', directionMode: 'instant', resultMode: 'instant', animationSpeed: 'fast', presetMode: 'instant', teamSelectionMode: 'default' },
+                            manual: { selectionMode: 'manual', directionMode: 'manual', resultMode: 'manual', animationSpeed: 'normal', presetMode: 'manual', teamSelectionMode: 'manual' }
+                          }
+                          const newConfig = { ...config, ...presets[preset] }
+                          setConfig(newConfig)
+                          saveConfig(newConfig)
+                        }}
                         className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition-all duration-200 backdrop-blur-sm hover:bg-slate-700/70"
                       >
-                        <option value="normal">🎯 Normal (Spinner ile)</option>
-                        <option value="fast">🚀 Hızlı (Otomatik)</option>
-                        <option value="manual">🎮 Manuel (Elle Seçim)</option>
-                  </select>
-                      <p className="mt-2 text-xs text-slate-400">
-                        {config.fastMode ? "Hızlı otomatik oyun" : 
-                         config.manualMode ? "Manuel kontrol" : 
-                         "Spinner ile rastgele seçim"}
-                      </p>
-                </div>
+                        <option value="normal">🎯 {t('presetNormal')}</option>
+                        <option value="fast">🚀 {t('presetFast')}</option>
+                        <option value="instant">⚡ {t('presetInstant')}</option>
+                        <option value="manual">🎮 {t('presetManual')}</option>
+                      </select>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-sky-300 uppercase tracking-wide">{t('selection')}</label>
+                        <select
+                          value={config.selectionMode}
+                          onChange={(e)=>{ const newConfig = { ...config, selectionMode: e.target.value as any }; setConfig(newConfig); saveConfig(newConfig) }}
+                          className="w-full rounded-lg border border-slate-600/50 bg-slate-800/70 px-3 py-2 text-white"
+                        >
+                          <option value="normal">{t('dirOptDefaultWheel')}</option>
+                          <option value="fast">{t('dirOptFastWheel')}</option>
+                          <option value="instant">{t('dirOptInstant')}</option>
+                          <option value="random">{t('rand')}</option>
+                          <option value="manual">{t('manual')}</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-purple-300 uppercase tracking-wide">{t('direction')}</label>
+                        <select
+                          value={config.directionMode}
+                          onChange={(e)=>{ const newConfig = { ...config, directionMode: e.target.value as any }; setConfig(newConfig); saveConfig(newConfig) }}
+                          className="w-full rounded-lg border border-slate-600/50 bg-slate-800/70 px-3 py-2 text-white"
+                        >
+                          <option value="normal">{t('dirOptDefaultWheel')}</option>
+                          <option value="fast">{t('dirOptFastWheel')}</option>
+                          <option value="instant">{t('dirOptInstant')}</option>
+                          <option value="random">{t('rand')}</option>
+                          <option value="manual">{t('manual')}</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-rose-300 uppercase tracking-wide">{t('result')}</label>
+                        <select
+                          value={config.resultMode}
+                          onChange={(e)=>{ const newConfig = { ...config, resultMode: e.target.value as any }; setConfig(newConfig); saveConfig(newConfig) }}
+                          className="w-full rounded-lg border border-slate-600/50 bg-slate-800/70 px-3 py-2 text-white"
+                        >
+                          <option value="normal">{t('resultReal')}</option>
+                          <option value="random">{t('resultRandom')}</option>
+                          <option value="manual">{t('resultManual')}</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-semibold text-emerald-300 uppercase tracking-wide">{t('anim')}</label>
+                        <select
+                          value={config.animationSpeed}
+                          onChange={(e)=>{ const newConfig = { ...config, animationSpeed: e.target.value as any }; setConfig(newConfig); saveConfig(newConfig) }}
+                          className="w-full rounded-lg border border-slate-600/50 bg-slate-800/70 px-3 py-2 text-white"
+                        >
+                          <option value="normal">{t('animNormal')}</option>
+                          <option value="fast">{t('animFast')}</option>
+                          <option value="none">{t('animNone')}</option>
+                        </select>
+                      </div>
+                    </div>
+                    
+                    {/* Randomize All Settings Button */}
+                    <div className="mt-4 pt-4 border-t border-slate-600/30">
+                      <button
+                        onClick={() => {
+                          const randomConfig = {
+                            ...config,
+                            presetMode: ['normal', 'fast', 'instant', 'manual'][Math.floor(Math.random() * 4)] as any,
+                            selectionMode: ['normal', 'fast', 'instant', 'random', 'manual'][Math.floor(Math.random() * 5)] as any,
+                            directionMode: ['normal', 'fast', 'instant', 'random', 'manual'][Math.floor(Math.random() * 5)] as any,
+                            resultMode: ['normal', 'random', 'manual'][Math.floor(Math.random() * 3)] as any,
+                            animationSpeed: ['normal', 'fast', 'none'][Math.floor(Math.random() * 3)] as any,
+                            mapColoring: ['striped', 'solid'][Math.floor(Math.random() * 2)] as any,
+                            teamSelectionMode: ['default', 'manual'][Math.floor(Math.random() * 2)] as any,
+                            numTeams: Math.floor(Math.random() * 8) + 4, // 4-11 teams
+                            selectedCountry: ['Turkey', 'Italy', 'Germany', 'Portugal', 'Netherlands', 'England'][Math.floor(Math.random() * 6)] as any
+                          }
+                          setConfig(randomConfig)
+                          saveConfig(randomConfig)
+                          setNumTeams(randomConfig.numTeams)
+                          setCountry(randomConfig.selectedCountry)
+                        }}
+                        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-semibold rounded-xl border border-white/20 transition-all duration-300 transform hover:scale-105"
+                      >
+                        <span className="text-xl">🎲</span>
+                        <span>{t('randomizeAll')}</span>
+                      </button>
+                    </div>
+                  </div>
               </div>
                 </div>
 
@@ -473,11 +696,24 @@ function App() {
                 <div className="mt-4 pt-4 border-t border-slate-700/50">
                 <button
                     className="group relative w-full bg-gradient-to-r from-emerald-500 to-blue-500 hover:from-emerald-400 hover:to-blue-400 text-white font-bold py-2.5 px-5 rounded-xl transition-all duration-300 transform hover:scale-105 hover:shadow-2xl focus:outline-none focus:ring-4 focus:ring-emerald-400/30"
-                  onClick={() => { if (config.manualMode) { setManualMapping({}); setManualSelectedClubIdx(0) } ; setGameStarted(true) }}
+                  onClick={() => {
+                    if (config.teamSelectionMode === 'layout') {
+                      const layout = availableLayouts.find(l => l.name === config.teamSelectionLayoutName)
+                      if (layout) {
+                        setManualMapping(layout.mapping)
+                        setManualSelectedClubIdx(null)
+                        setLayoutSaved(true)
+                      }
+                    } else if (config.teamSelectionMode === 'manual') {
+                      setManualMapping({}); setManualSelectedClubIdx(0)
+                      setLayoutSaved(false)
+                    }
+                    setGameStarted(true)
+                  }}
                 >
                     <span className="relative z-10 flex items-center justify-center gap-2">
                       <span className="text-base">🏆</span>
-                      <span className="text-base">Oyunu Başlat</span>
+                      <span className="text-base">{t('start')}</span>
                       <span className="text-base">⚽</span>
                     </span>
                     <div className="absolute inset-0 bg-gradient-to-r from-emerald-400 to-blue-400 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
@@ -491,18 +727,18 @@ function App() {
             <div className="mt-6 grid gap-3 md:grid-cols-3">
               <div className="group p-4 bg-slate-800/40 border border-slate-700/50 rounded-xl backdrop-blur-sm hover:bg-slate-700/40 transition-all duration-300 animate-fade-in-left hover:scale-105 hover:shadow-xl hover:shadow-emerald-500/10">
                 <div className="text-2xl mb-2 animate-float">🎯</div>
-                <h3 className="text-base font-semibold text-white mb-1">Stratejik Savaşlar</h3>
-                <p className="text-slate-400 text-xs">Takımlarınızla dünyayı fethedin ve stratejik hamlelerle rakiplerinizi alt edin.</p>
+                <h3 className="text-base font-semibold text-white mb-1">{t('strategicWars')}</h3>
+                <p className="text-slate-400 text-xs">{t('strategicWarsDesc')}</p>
               </div>
               <div className="group p-4 bg-slate-800/40 border border-slate-700/50 rounded-xl backdrop-blur-sm hover:bg-slate-700/40 transition-all duration-300 animate-fade-in-up hover:scale-105 hover:shadow-xl hover:shadow-blue-500/10" style={{animationDelay: '0.2s'}}>
                 <div className="text-2xl mb-2 animate-float" style={{animationDelay: '0.5s'}}>🎲</div>
-                <h3 className="text-base font-semibold text-white mb-1">Şans ve Beceri</h3>
-                <p className="text-slate-400 text-xs">Hem şans hem de futbol bilginizle kazanın. Her hamle yeni bir macera.</p>
+                <h3 className="text-base font-semibold text-white mb-1">{t('luckSkill')}</h3>
+                <p className="text-slate-400 text-xs">{t('luckSkillDesc')}</p>
               </div>
               <div className="group p-4 bg-slate-800/40 border border-slate-700/50 rounded-xl backdrop-blur-sm hover:bg-slate-700/40 transition-all duration-300 animate-fade-in-right hover:scale-105 hover:shadow-xl hover:shadow-purple-500/10" style={{animationDelay: '0.4s'}}>
                 <div className="text-2xl mb-2 animate-float" style={{animationDelay: '1s'}}>🏆</div>
-                <h3 className="text-base font-semibold text-white mb-1">İmparatorluk Kurun</h3>
-                <p className="text-slate-400 text-xs">En büyük futbol imparatorluğunu kurun ve dünyayı tek çatı altında toplayın.</p>
+                <h3 className="text-base font-semibold text-white mb-1">{t('buildEmpire')}</h3>
+                <p className="text-slate-400 text-xs">{t('buildEmpireDesc')}</p>
               </div>
             </div>
           </div>
@@ -516,13 +752,55 @@ function App() {
                   showTeamSpinner={uiStep === "team" && teamSpinTarget !== undefined}
                   uiStep={uiStep || ""}
                   cells={cells}
-                  fastMode={config.fastMode}
-                  manualMode={config.manualMode}
-                  manualMapping={config.manualMode ? manualMapping : undefined}
+                  fastMode={config.animationSpeed === 'fast'}
+                  animationSpeed={config.animationSpeed}
+                  selectionMode={config.selectionMode}
+                  manualMode={manualEnabled}
+                  manualMapping={manualEnabled ? manualMapping : undefined}
                   attackedTeam={attackedTeam}
                   attackedTeamId={attackedTeamId}
+                  targetSelectMode={config.directionMode === 'manual' && teamWinner != null && attackedTeamId == null}
+                  attackerSelectMode={uiStep !== 'team' && teamWinner === null && config.selectionMode === 'manual'}
+                  onAttackerSelect={(teamId:number)=>{
+                    const attacker = teams.find(t=> t.id === teamId)
+                    if (!attacker) return
+                    setTeamWinner(attacker.id)
+                    setPreviewFromTeamId(attacker.id)
+                    playClick()
+                    setAnnouncement(`⚔️ ${attacker.name}`)
+                    setUiStep('direction-ready')
+                    setTimeout(()=> setAnnouncement(null), 800)
+                  }}
+                  onTargetSelect={(cellId:number)=>{
+                    const attackerId = teamWinner
+                    if (attackerId == null) return
+                    const targetCell = cells.find(c => c.id === cellId)
+                    if (!targetCell) return
+                    if (targetCell.ownerTeamId === attackerId) return
+                    const attackerCells = cells.filter(c => c.ownerTeamId === attackerId)
+                    if (attackerCells.length === 0) return
+                    let fromId = attackerCells[0].id
+                    let best = Infinity
+                    for (const c of attackerCells) {
+                      const dx = (c as any).centroid?.[0] - (targetCell as any).centroid?.[0]
+                      const dy = (c as any).centroid?.[1] - (targetCell as any).centroid?.[1]
+                      const d = (dx||0)*(dx||0) + (dy||0)*(dy||0)
+                      if (d < best) { best = d; fromId = c.id }
+                    }
+                    setPreviewTarget(fromId, cellId)
+                    setPreviewFromTeamId(attackerId)
+                    const defTeam = teams.find(t => t.id === targetCell.ownerTeamId)
+                    if (defTeam) {
+                      setAttackedTeam(defTeam.name)
+                      setAttackedTeamId(defTeam.id)
+                      setAnnouncement(`🎯 ${t('defendingTeam')}: ${defTeam.name}`)
+                      setTimeout(()=> setAnnouncement(null), 1200)
+                      // Immediately set battle state for manual defender selection
+                      setUiStep("attacking")
+                    }
+                  }}
                   onCellClick={(cellId:number)=>{
-                    if (!config.manualMode) return
+                    if (!manualEnabled) return
                     if (manualSelectedClubIdx == null) return
                     const assignIdx = manualSelectedClubIdx
                     // Move team if already placed: remove its old cell
@@ -533,16 +811,17 @@ function App() {
                     if (nextMap[cellId] != null) delete nextMap[cellId]
                     nextMap[cellId] = assignIdx
                     setManualMapping(nextMap)
+                    setLayoutSaved(false)
                     // Instant feedback announcement
                     const club = manualClubs[assignIdx]
                     if (club) {
-                      setAnnouncement(`📍 ${club.name} yerleştirildi`)
+                      setAnnouncement(`📍 ${club.name} ${t('teamPlaced')}`)
                       setTimeout(() => setAnnouncement(null), 1200)
                     }
                     const placed = Object.keys(nextMap).length
                     if (placed >= numTeams) {
                       // Final toast when all placements are done
-                      setAnnouncement('✅ Yerleşim tamamlandı, oyun hazır!')
+                      setAnnouncement(`✅ ${t('placementComplete')}, ${t('gameReady')}!`)
                       setTimeout(() => setAnnouncement(null), 1200)
                       return
                     }
@@ -571,7 +850,7 @@ function App() {
                       
                       // Show attacker message after 2 seconds
                       setTimeout(() => {
-                        setAnnouncement(`⚔️ Saldıran Takım: ${attacker.name}`)
+                        setAnnouncement(`⚔️ ${t('attackingTeam')}: ${attacker.name}`)
                         setUiStep("direction-ready") // Hide spinner immediately when announcement shows
                         
                         // Hide announcement after 2 seconds
@@ -591,7 +870,7 @@ function App() {
                      boxShadow: '0 8px 32px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)'
                    }}>
                 <h2 className="mb-2 text-base font-semibold text-white">
-                  Tur {turn + 1}
+                  {t('turn')} {turn + 1}
                 </h2>
                 {attackerTeam && showAttackerInfo && (
                   <motion.div
@@ -629,8 +908,13 @@ function App() {
                     </div>
                   </motion.div>
                 )}
-                {/* Team Selection Button */}
-                {uiStep !== "team" && teamWinner === null && (!config.manualMode || (config.manualMode && (!gameStarted || Object.keys(manualMapping).length >= numTeams))) && (
+                {/* Team Selection Button / Manual attacker pick */}
+                {config.selectionMode === 'manual' && teamWinner === null && (
+                  <div className="flex justify-center mb-4">
+                    <div className="w-full text-center py-3 px-4 bg-amber-900/20 rounded-xl border border-amber-500/30">{t('selectionManualHint')}</div>
+                  </div>
+                )}
+                {config.selectionMode !== 'manual' && uiStep !== "team" && teamWinner === null && (!manualEnabled || (manualEnabled && (!gameStarted || Object.keys(manualMapping).length >= numTeams))) && (
                   <div className="flex justify-center mb-4">
                       <button
                         onClick={() => {
@@ -652,17 +936,42 @@ function App() {
                           console.warn(e)
                         }
                         
-                        // SONRA spinner başlat
-                        setUiStep("team")
+                        // SONRA seçim moduna göre ilerle
                         const targetIndex = pickWeightedTeamIndex()
-                        setTeamSpinTarget(targetIndex)
+                        if (config.selectionMode === 'instant' || config.animationSpeed === 'none') {
+                          const attacker = liveTeams[targetIndex]
+                          if (attacker) {
+                            setTeamWinner(attacker.id)
+                            setPreviewFromTeamId(attacker.id)
+                            playClick()
+                            const delay = config.animationSpeed === 'fast' ? 800 : 2000
+                            setAnnouncement(`⚔️ ${t('attackingTeam')}: ${attacker.name}`)
+                            setUiStep("direction-ready")
+                            setTimeout(()=> setAnnouncement(null), delay)
+                          }
+                        } else if (config.selectionMode === 'random') {
+                          // Random selection - pick any team instantly
+                          const randomIndex = Math.floor(Math.random() * liveTeams.length)
+                          const attacker = liveTeams[randomIndex]
+                          if (attacker) {
+                            setTeamWinner(attacker.id)
+                            setPreviewFromTeamId(attacker.id)
+                            playClick()
+                            setAnnouncement(`⚔️ ${t('attackingTeam')}: ${attacker.name}`)
+                            setUiStep("direction-ready")
+                            setTimeout(()=> setAnnouncement(null), 1200)
+                          }
+                        } else {
+                          setUiStep("team")
+                          setTeamSpinTarget(targetIndex)
+                        }
                       }}
                       className="group relative overflow-hidden bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-400 hover:to-orange-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20"
                       disabled={disabledTeamBtn}
                     >
                       <span className="relative z-10 flex items-center justify-center gap-2">
                         <span className="text-xl">⚔️</span>
-                        <span className="text-base">Atak Yapan Takımı Seç</span>
+                        <span className="text-base">{t('attackerPick')}</span>
                         <span className="text-xl">🎯</span>
                       </span>
                       <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
@@ -670,9 +979,9 @@ function App() {
                       </button>
                     </div>
                   )}
-                {config.manualMode && gameStarted && manualPlacedCount < numTeams && (
+                {manualEnabled && gameStarted && manualPlacedCount < numTeams && (
                   <div className="w-full text-center py-3 px-4 bg-amber-900/20 rounded-xl border border-amber-500/30 mb-3">
-                    <div className="text-amber-300 text-sm font-medium mb-2">Manuel yerleşim</div>
+                    <div className="text-amber-300 text-sm font-medium mb-2">{t('manualPlacement')}</div>
                     {/* Selectable teams (all teams) */}
                     <div className="flex flex-wrap gap-2 justify-center mb-2">
                       {manualClubs.map((c, idx) => (
@@ -683,7 +992,7 @@ function App() {
                     {/* Picked teams list */}
                     {manualPickedSet.size > 0 && (
                       <div className="mt-2">
-                        <div className="text-emerald-300 text-xs mb-1">Seçilenler</div>
+                        <div className="text-emerald-300 text-xs mb-1">{t('picked')}</div>
                         <div className="flex flex-wrap gap-2 justify-center">
                           {manualClubs.map((c, idx) => manualPickedSet.has(idx) && (
                             <button key={`picked-${idx}`} onClick={()=> setManualSelectedClubIdx(idx)}
@@ -692,22 +1001,53 @@ function App() {
                         </div>
                       </div>
                     )}
-                    <div className="text-amber-400 text-xs mt-2">Seçtiğiniz takımın merkezini haritada tıklayın ({manualPlacedCount}/{numTeams})</div>
+                    <div className="text-amber-400 text-xs mt-2">{t('clickToPlace')} ({manualPlacedCount}/{numTeams})</div>
+                  </div>
+                )}
+                {manualEnabled && config.teamSelectionMode === 'manual' && gameStarted && manualPlacedCount >= numTeams && !layoutSaved && (
+                  <div className="w-full text-center py-3 px-4 bg-emerald-900/20 rounded-xl border border-emerald-500/30 mb-3">
+                    <div className="text-emerald-300 text-sm font-medium mb-2">{t('placementDone')}</div>
+                    <div className="flex items-center justify-center gap-2">
+                      <input
+                        value={saveName}
+                        onChange={(e)=> setSaveName(e.target.value)}
+                        placeholder={t('layoutName')}
+                        className="min-w-0 flex-1 rounded-md bg-slate-800/70 border border-emerald-400/30 px-3 py-1.5 text-sm text-white placeholder:text-slate-400"
+                      />
+                      <button
+                        onClick={()=>{
+                          const name = (saveName || `Düzen ${new Date().toLocaleString()}`).trim()
+                          const layout = { name, country: selectedCountry, numTeams, mapping: manualMapping, createdAt: Date.now() }
+                          saveLayoutPreset(layout as any)
+                          setSavedLayouts(loadLayouts())
+                          setAnnouncement(`💾 '${name}' ${t('layoutSaved')}`)
+                          setTimeout(()=> setAnnouncement(null), 1200)
+                          setSaveName("")
+                          setLayoutSaved(true)
+                        }}
+                        className="rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-3 py-1.5 border border-white/10"
+                      >{t('save')}</button>
+                    </div>
                   </div>
                 )}
 
                 {uiStep === "team" && teamSpinTarget !== undefined && (
                   <div className="w-full text-center py-4 px-6 bg-amber-900/20 rounded-xl border border-amber-500/30">
                     <div className="text-amber-300 animate-pulse text-lg font-medium">
-                      ⚔️ Takım seçiliyor...
+                      ⚔️ {t('teamSelecting')}
                       </div>
                     <div className="text-amber-400 text-sm mt-1">
-                      Haritada dönen çarkı izleyin
+                      {t('watchWheel')}
                       </div>
                         </div>
                       )}
                 
-                {uiStep === "direction-ready" && teamWinner != null && (
+                {config.directionMode === 'manual' && teamWinner != null && attackedTeamId == null && (
+                  <div className="w-full text-center py-4 px-6 bg-blue-900/20 rounded-xl border border-blue-500/30 mb-3">
+                    <div className="text-blue-300 font-medium">{t('directionManualHint')}</div>
+                  </div>
+                )}
+                {uiStep === "direction-ready" && teamWinner != null && config.directionMode !== 'manual' && (
                   <div className="space-y-3">
                     <button
                       onClick={() => {
@@ -715,15 +1055,52 @@ function App() {
                         if (!attacker) {
                           return
                         }
+                        // Manual defender pick
+                        if (config.directionMode === 'manual') {
+                          try { setBeam(false, undefined) } catch {}
+                          setUiStep('attacking')
+                          setShowAttackerInfo(false)
+                          setAnnouncement('🎯 Haritadan savunulacak takımı seçin')
+                          setTimeout(()=> setAnnouncement(null), 1200)
+                          return
+                        }
+                        // Random defender selection
+                        if (config.directionMode === 'random') {
+                          const candidateCells = cells.filter(c => c.ownerTeamId !== attacker.id)
+                          if (candidateCells.length === 0) return
+                          const picked = candidateCells[Math.floor(Math.random() * candidateCells.length)]
+                          const attackerCells2 = cells.filter(c => c.ownerTeamId === attacker.id)
+                          if (attackerCells2.length === 0) return
+                          let fromId = attackerCells2[0].id
+                          let best = Infinity
+                          for (const c of attackerCells2) {
+                            const dx = (c as any).centroid?.[0] - (picked as any).centroid?.[0]
+                            const dy = (c as any).centroid?.[1] - (picked as any).centroid?.[1]
+                            const d = (dx||0)*(dx||0) + (dy||0)*(dy||0)
+                            if (d < best) { best = d; fromId = c.id }
+                          }
+                          setPreviewTarget(fromId, picked.id)
+                          try { setBeam(false, undefined) } catch {}
+                          setUiStep('attacking')
+                          const defTeam = teams.find(t => t.id === picked.ownerTeamId)
+                          if (defTeam) {
+                            setAttackedTeam(defTeam.name)
+                            setAttackedTeamId(defTeam.id)
+                            setAnnouncement(`🎯 ${t('defendingTeam')}: ${defTeam.name}`)
+                            setTimeout(()=> setAnnouncement(null), 800)
+                          }
+                          return
+                        }
                         
-                        // Start rotating arrow animation (5 seconds)
+                        // Start rotating arrow animation
                         const randomAngle = Math.random() * 360
                         setRotatingArrow(attacker.id, randomAngle)
                         setUiStep("direction-spinning")
                         // Show guidance beam only during direction selection
                         try { setBeam(true, undefined) } catch {}
                         
-                        // After 5 seconds, arrow stops and beam starts
+                        // After delay, arrow stops and resolve target
+                        const spinDelay = (config.directionMode === 'instant' || config.animationSpeed === 'none') ? 0 : ((config.directionMode === 'fast' || config.animationSpeed === 'fast') ? 800 : 2000)
                         setTimeout(() => {
                           // Ok yönüne en yakın 8-yön eşleştirmesi için dereceye çevrilir
                           
@@ -818,9 +1195,9 @@ function App() {
                               if (defTeam) {
                                 setAttackedTeam(defTeam.name)
                                 setAttackedTeamId(defTeam.id)
-                                setAnnouncement(`🎯 Saldırılan Takım: ${defTeam.name}`)
+                                setAnnouncement(`🎯 ${t('defendingTeam')}: ${defTeam.name}`)
                               }
-                            }, 800)
+                            }, (config.animationSpeed === 'none' || config.directionMode === 'instant') ? 0 : (config.animationSpeed === 'fast' || config.directionMode === 'fast' ? 400 : 800))
                           } else {
                               setAnnouncement('⚠️ Bu yönde takım bulunamadı!')
                               setRotatingArrow(undefined, undefined)
@@ -828,13 +1205,13 @@ function App() {
                               // Auto-hide after 2 seconds
                               setTimeout(() => setAnnouncement(null), 2000)
                           }
-                        }, 2000) // Wait for arrow rotation (2 seconds now)
+                        }, spinDelay)
                       }}
                       className="group relative overflow-hidden bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-400 hover:to-purple-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20 w-full"
                     >
                       <span className="relative z-10 flex items-center justify-center gap-2">
                         <span className="text-xl">🧭</span>
-                        <span className="text-base">Yön Seç</span>
+                        <span className="text-base">{t('direction')}</span>
                         <span className="text-xl">🎯</span>
                       </span>
                       <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
@@ -846,15 +1223,15 @@ function App() {
                 {uiStep === "direction-spinning" && (
                   <div className="w-full text-center py-4 px-6 bg-blue-900/20 rounded-xl border border-blue-500/30">
                     <div className="text-blue-300 animate-pulse text-lg font-medium">
-                      🧭 Yön belirleniyor...
+                      🧭 {t('directionSelecting')}
                     </div>
                     <div className="text-blue-400 text-sm mt-1">
-                      Haritada dönen oku izleyin
+                      {t('watchArrow')}
                     </div>
                   </div>
                 )}
 
-                {uiStep === "attacking" && (
+                {uiStep === "attacking" && config.resultMode !== 'manual' && (
                   <div className="flex justify-center mb-4">
                     <button
                       onClick={() => {
@@ -868,8 +1245,15 @@ function App() {
                         setUiStep("direction-spinning")
                         try { setBeam(false, undefined) } catch {}
                         // Apply battle after a short animation
+                        const resultDelay = (config.resultMode === 'instant' || config.animationSpeed === 'none') ? 0 : ((config.resultMode === 'fast' || config.animationSpeed === 'fast') ? 600 : 1400)
                         setTimeout(() => {
-                          (useGameStore.getState() as { applyAttackToCell: (a:number,f:number,t:number)=>{success:boolean} }).applyAttackToCell(attacker.id, previewFromId, previewToId)
+                          if (config.resultMode === 'random') {
+                            const localRng = createRng(`${seed}:result:${turn}:${previewFromId}:${previewToId}:${Date.now()}`)
+                            const attackerWon = localRng() < 0.5
+                            ;(useGameStore.getState() as { applyAttackWithOutcome: (a:number,f:number,t:number,w:boolean)=>{success:boolean} }).applyAttackWithOutcome(attacker.id, previewFromId, previewToId, attackerWon)
+                          } else {
+                            ;(useGameStore.getState() as { applyAttackToCell: (a:number,f:number,t:number)=>{success:boolean} }).applyAttackToCell(attacker.id, previewFromId, previewToId)
+                          }
                           // Cleanup and prepare next turn
                           try {
                             setBeam(false, undefined)
@@ -884,17 +1268,47 @@ function App() {
                           setSelectedDirection(null)
                           setTeamWinner(null)
                           setUiStep(null)
-                        }, 1400)
+                        }, resultDelay)
                       }}
                       className="group relative overflow-hidden bg-gradient-to-r from-rose-600 to-amber-500 hover:from-rose-500 hover:to-amber-400 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20 w-full"
                     >
                       <span className="relative z-10 flex items-center justify-center gap-2">
                         <span className="text-xl">⚔️</span>
-                        <span className="text-base">Mücadeleyi Başlat</span>
+                        <span className="text-base">{t('battleStart')}</span>
                         <span className="text-xl">🔥</span>
                       </span>
                       <div className="absolute inset-0 bg-gradient-to-r from-white/20 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100"></div>
                       <div className="absolute inset-0 rounded-xl bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+                    </button>
+                  </div>
+                )}
+                {uiStep === "attacking" && config.resultMode === 'manual' && (
+                  <div className="flex justify-center gap-2 mb-4">
+                    <button
+                      onClick={() => {
+                        const attacker = liveTeams.find(t => t.id === teamWinner)
+                        const storeState = useGameStore.getState() as { previewToCellId?: number, previewFromCellId?: number }
+                        const previewToId = storeState.previewToCellId
+                        const previewFromId = storeState.previewFromCellId
+                        if (!attacker || previewToId == null || previewFromId == null) return
+                        ;(useGameStore.getState() as any).applyAttackWithOutcome(attacker.id, previewFromId, previewToId, true)
+                        setAttackedTeam(null); setAttackedTeamId(null); setAnnouncement(null); setSelectedDirection(null); setTeamWinner(null); setUiStep(null)
+                      }}
+                      className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold border border-white/10">
+                      {t('attackerWins')}
+                    </button>
+                    <button
+                      onClick={() => {
+                        const attacker = liveTeams.find(t => t.id === teamWinner)
+                        const storeState = useGameStore.getState() as { previewToCellId?: number, previewFromCellId?: number }
+                        const previewToId = storeState.previewToCellId
+                        const previewFromId = storeState.previewFromCellId
+                        if (!attacker || previewToId == null || previewFromId == null) return
+                        ;(useGameStore.getState() as any).applyAttackWithOutcome(attacker.id, previewFromId, previewToId, false)
+                        setAttackedTeam(null); setAttackedTeamId(null); setAnnouncement(null); setSelectedDirection(null); setTeamWinner(null); setUiStep(null)
+                      }}
+                      className="px-4 py-2 rounded-lg bg-rose-600 text-white text-sm font-semibold border border-white/10">
+                      {t('defenderWins')}
                     </button>
                   </div>
                 )}
@@ -926,7 +1340,7 @@ function App() {
                 {/* History & Stats Section */}
                 <div className="mt-4 border-t border-white/20 pt-4">
                   <h3 className="mb-3 text-sm font-semibold text-white/90 uppercase tracking-wide">
-                    📊 Geçmiş & İstatistikler
+                    📊 {t('historyStats')}
                   </h3>
                   
                   {/* Team Stats */}
@@ -938,6 +1352,7 @@ function App() {
                       const losses = teamHistory.length - wins
                       const clubInfo = (COUNTRY_CLUBS[selectedCountry] || []).find((c:any)=> c.name === t.name)
                       const primary = clubInfo?.colors?.[0] || t.color
+                      const strength = t.overall || 75
                       
                       return (
                         <div key={t.id} className="flex items-center justify-between rounded-lg p-2 backdrop-blur-sm border"
@@ -953,6 +1368,7 @@ function App() {
                             <span className="text-emerald-400">🏆 {teamCells.length}</span>
                             <span className="text-blue-400">⚔️ {wins}</span>
                             <span className="text-red-400">💥 {losses}</span>
+                            <span className="text-yellow-400">💪 {strength}</span>
               </div>
                         </div>
                       )
@@ -961,9 +1377,9 @@ function App() {
                   
                   {/* Recent History */}
                   <div className="max-h-32 overflow-auto">
-                    <h4 className="mb-2 text-xs font-medium text-white/70">Son Hamleler</h4>
+                    <h4 className="mb-2 text-xs font-medium text-white/70">{t('lastMoves')}</h4>
                   {history.length === 0 ? (
-                      <div className="text-xs text-slate-400">Henüz hamle yok.</div>
+                      <div className="text-xs text-slate-400">{t('noMovesYet')}</div>
                   ) : (
                       <div className="space-y-1">
                       {history
@@ -995,83 +1411,36 @@ function App() {
           </div>
         )}
       </div>
-      {/* Mobile bar with glassmorphism */}
-      <div className="fixed inset-x-0 bottom-0 z-40 block border-t border-white/20 p-3 backdrop-blur-xl md:hidden"
-           style={{
-             background: 'linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))',
-             boxShadow: '0 -8px 32px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)'
-           }}>
-        <div className="mx-auto flex max-w-5xl items-center justify-center gap-2">
-          <button
-            aria-label="Spin Team"
-            className="rounded bg-indigo-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            onClick={() => {
-              const teamIndex = pickWeightedTeamIndex()
-              setTeamWinner(teamIndex)
-            }}
-          >
-            Team
-          </button>
-          <button
-            aria-label="Spin Direction"
-            className="rounded bg-indigo-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            onClick={() => {
-              // Direction selection logic removed
-            }}
-          >
-            Dir
-          </button>
-          <button
-            aria-label="Apply Attack"
-            className="rounded bg-emerald-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            onClick={() => {
-              if (teamWinner == null) return
-              const attackerTeam = liveTeams[teamWinner]
-              const dir = DIRECTIONS[Math.floor(Math.random() * DIRECTIONS.length)]
-              if (!attackerTeam) return
-              playClick()
-              applyAttack(attackerTeam.id, dir)
-              setTimeout(() => playCapture(), 120)
-            }}
-          >
-            Go
-          </button>
-          <button
-            aria-label="Fast Auto Turn"
-            className="rounded bg-rose-600 px-3 py-2 text-white shadow transition active:scale-95 focus:outline-none focus:ring-2 focus:ring-rose-500"
-            onClick={() => {
-              const r = playAutoTurn()
-              if (r.success) {
-                playClick()
-                setTimeout(() => playCapture(), 120)
-              }
-            }}
-          >
-            Auto
-          </button>
-        </div>
-      </div>
       {/* Restart button (desktop) */}
       <div className="hidden md:flex fixed bottom-4 right-4 z-40">
         <button
           className="rounded-xl px-4 py-2 font-semibold text-white bg-gradient-to-r from-slate-600 to-slate-800 border border-white/20 shadow-lg hover:from-slate-500 hover:to-slate-700"
           onClick={() => window.location.reload()}
         >
-          Yeniden Başlat
+          {t('restart')}
         </button>
       </div>
       {isGameOver && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-slate-900/80 to-black/70 p-4">
           <div className="w-full max-w-md rounded-2xl border border-white/20 p-6 backdrop-blur-xl"
                style={{background:'linear-gradient(135deg, rgba(255,255,255,0.15), rgba(255,255,255,0.05))'}}>
-            <h3 className="text-2xl font-extrabold text-white mb-2">Oyun Bitti</h3>
-            <p className="text-slate-200">Kazanan: {liveTeams[0]?.name}</p>
+            <div className="text-center">
+              <div className="text-6xl mb-4">🏆</div>
+              <h3 className="text-3xl font-extrabold text-white mb-4 bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
+                {t('gameOver')}
+              </h3>
+              <div className="bg-gradient-to-r from-emerald-500/20 to-blue-500/20 border border-emerald-400/30 rounded-xl p-4 backdrop-blur-sm">
+                <p className="text-lg font-semibold text-emerald-300">
+                  {t('winner')}: <span className="text-yellow-300 font-bold">{liveTeams[0]?.name}</span>
+                </p>
+              </div>
+            </div>
             <div className="mt-4 flex justify-end">
               <button
                 className="rounded-xl px-4 py-2 font-semibold text-white bg-gradient-to-r from-slate-600 to-slate-800 border border-white/20 shadow-lg hover:from-slate-500 hover:to-slate-700"
                 onClick={() => window.location.reload()}
               >
-                Yeniden Başlat
+                {t('restart')}
               </button>
             </div>
           </div>
