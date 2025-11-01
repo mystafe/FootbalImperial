@@ -36,6 +36,7 @@ function App() {
   const [layoutSaved, setLayoutSaved] = useState<boolean>(false)
   const m = useMemo(() => ({
     tr: {
+      gameMode: 'Oyun Modu', footballMode: 'Futbol İmparatorluğu', worldDomination: 'Dünya Hakimiyeti',
       country: 'Ülke Seçimi', teams: 'Takım Sayısı', mapLook: 'Harita Görünümü', striped: 'Şeritli Desenler', solid: 'Düz Renkler',
       classic: 'Klasik', modern: 'Modern', retro: 'Retro', minimal: 'Minimal', vibrant: 'Canlı',
       themeClassic: 'Klasik', themeNeon: 'Neon', themeOcean: 'Okyanus', themeFire: 'Ateş', themeForest: 'Orman',
@@ -67,6 +68,7 @@ function App() {
       animNormal: 'Normal', animFast: 'Hızlı', animNone: 'Animasyonsuz', randomizeAll: 'Rastgele Ayarla'
     },
     en: {
+      gameMode: 'Game Mode', footballMode: 'Football Imperial', worldDomination: 'World Domination',
       country: 'Country', teams: 'Team Count', mapLook: 'Map Look', striped: 'Striped', solid: 'Solid',
       classic: 'Classic', modern: 'Modern', retro: 'Retro', minimal: 'Minimal', vibrant: 'Vibrant',
       themeClassic: 'Classic', themeNeon: 'Neon', themeOcean: 'Ocean', themeFire: 'Fire', themeForest: 'Forest',
@@ -105,11 +107,8 @@ function App() {
     (s) => s.setSuppressLastOverlay as (v: boolean) => void
   )
   // Removed setFrozenSnapshotIndex - no longer needed
-  const setPreviewFromTeamId = useGameStore(
-    (s) =>
-      (s as unknown as { setPreviewFromTeamId: (id?: number) => void })
-        .setPreviewFromTeamId
-  )
+  const setPreviewFromTeamId = useGameStore((s) => (s as { setPreviewFromTeamId?: (id?: number) => void }).setPreviewFromTeamId)
+  const moveArmies = useGameStore((s) => (s as any).moveArmies as (f:number,t:number,c:number)=>{success:boolean})
   const setRotatingArrow = useGameStore(
     (s) =>
       (s as unknown as { setRotatingArrow: (teamId?: number, angle?: number) => void })
@@ -122,6 +121,14 @@ function App() {
   )
 
   const [teamWinner, setTeamWinner] = useState<number | null>(null)
+  const [wdPhase, setWdPhase] = useState<'landing'|'placement'|'attack'|'fortify'|null>(null)
+  const [gameModeSelected, setGameModeSelected] = useState<boolean>(false)
+  const [wdTotalPlayers, setWdTotalPlayers] = useState<number>(2)
+  const [wdHumanPlayers, setWdHumanPlayers] = useState<number>(1)
+  const [wdStartingArmies, setWdStartingArmies] = useState<number>(20)
+  const [pendingWdPlayers, setPendingWdPlayers] = useState<any[] | null>(null)
+  // expose store for quick debugging in browser console
+  try { (window as any).useGameState = useGameStore } catch (e) {}
   const [uiStep, setUiStep] = useState<
     "team" | "dir" | "attacking" | "direction-ready" | "direction-spinning" | null
   >(null)
@@ -129,6 +136,7 @@ function App() {
     undefined
   )
   const [toast, setToast] = useState<string | null>(null)
+  const [aiBusy, setAiBusy] = useState<boolean>(false)
   const [announcement, setAnnouncement] = useState<string | null>(null)
   const [showAttackerInfo, setShowAttackerInfo] = useState<boolean>(false)
   const [showDefenderInfo, setShowDefenderInfo] = useState<boolean>(false)
@@ -147,13 +155,22 @@ function App() {
   const [manualSelectedClubIdx, setManualSelectedClubIdx] = useState<number | null>(0)
   const manualPlacedCount = useMemo(() => Object.keys(manualMapping).length, [manualMapping])
   const manualPickedSet = useMemo(() => new Set(Object.values(manualMapping)), [manualMapping])
+  const setTeamsAndCells = useGameStore((s)=> s.setTeamsAndCells)
+  const setWdPlayersAndNeutralCells = useGameStore((s)=> (s as any).setWdPlayersAndNeutralCells as (players:any[],cells:any[])=>void)
+  const setTeamReserve = useGameStore((s)=> (s as any).setTeamReserve as (id:number, reserve:number)=>void)
+  const calculateReinforcementsForAll = useGameStore((s)=> (s as any).calculateReinforcementsForAll as ()=>void)
+  const playAutoTurn = useGameStore((s)=> (s as any).playAutoTurn as ()=>{success:boolean})
+  const advanceTurnStore = useGameStore((s)=> (s as any).advanceTurn as ()=>void)
+  const setTurnStore = useGameStore((s)=> (s as any).setTurn as (t:number)=>void)
+  
   const leagueMax = useMemo(() => {
     switch (selectedCountry) {
       case 'England':
       case 'Italy':
       case 'Spain':
         return 20
-      case 'France':
+      case 'Champions League':
+        return 32
       case 'Germany':
       case 'Portugal':
       case 'Netherlands':
@@ -191,6 +208,113 @@ function App() {
   useEffect(() => {
     rngRef.current = createRng(`${seed}:spins:${teams.length}:${cells.length}`)
   }, [seed, teams.length, cells.length])
+
+  // Initialize World Domination setup when game mode selected and starting
+  useEffect(() => {
+    if (config.gameMode !== 'world-domination') return
+    if (wdPhase === null) setWdPhase('landing')
+  }, [config.gameMode, wdPhase])
+
+  // Helper: schedule AI placement loop that places one army per AI turn sequentially
+  const aiPlacingRef = useRef(false)
+  const scheduleAiPlacementLoop = (delay = 200) => {
+    if (aiPlacingRef.current) return
+    aiPlacingRef.current = true
+
+    const step = async () => {
+      const gs = useGameStore.getState() as any
+      const teamsNow = gs.teams || []
+      if (!teamsNow || teamsNow.length === 0) {
+        aiPlacingRef.current = false
+        return
+      }
+      let current = teamsNow[gs.turn % teamsNow.length]
+      if (!current) { aiPlacingRef.current = false; return }
+      if (!String(current.name).startsWith('AI')) { aiPlacingRef.current = false; return }
+
+      // Place all reserves for current AI sequentially
+      while (true) {
+        const curReserve = (current as any).reserve ?? 0
+        if (curReserve <= 0) break
+
+        const neutrals = (gs.cells || []).filter((c:any)=> c.ownerTeamId === -1)
+        let pick: any = null
+        if (neutrals.length > 0) {
+          pick = neutrals[Math.floor(Math.random() * neutrals.length)]
+        } else {
+          const owned = (gs.cells || []).filter((c:any) => c.ownerTeamId === current.id)
+          if (owned.length === 0) break
+          owned.sort((a:any,b:any)=> (a.armies||0) - (b.armies||0))
+          pick = owned[0]
+        }
+
+        setAiBusy(true)
+        console.debug('AI placing one', { teamId: current.id, pick: pick?.id ?? pick })
+        gs.allocateArmies(current.id, pick.id, 1)
+        // small delay so placement is visible
+        await new Promise(r => setTimeout(r, Math.max(400, delay)))
+        // refresh gs and current
+        current = useGameStore.getState().teams[useGameStore.getState().turn % useGameStore.getState().teams.length]
+      }
+
+      // after placing all reserves for current AI, advance to next player
+      advanceTurnStore()
+      const nextState = useGameStore.getState()
+      const next = nextState.teams.length ? nextState.teams[nextState.turn % nextState.teams.length] : null
+      aiPlacingRef.current = false
+      ;(nextState as any).setPreviewFromTeamId?.(next?.id)
+      setAiBusy(false)
+      // if next is AI with reserve, continue
+      if (next && String(next.name).startsWith('AI') && ((next as any).reserve ?? 0) > 0) {
+        setTimeout(step, delay)
+      }
+    }
+    setTimeout(step, delay)
+  }
+  const lastClickRef = useRef<number>(0)
+
+  // Place exactly one army for the current AI player and advance turn
+  const placeAiOneAndAdvance = () => {
+    const gs = useGameStore.getState() as any
+    const teamsNow = gs.teams || []
+    if (!teamsNow || teamsNow.length === 0) return false
+    const current = teamsNow[gs.turn % teamsNow.length]
+    if (!current || !String(current.name).startsWith('AI')) return false
+    const curReserve = (current as any).reserve ?? 0
+    if (curReserve <= 0) {
+      advanceTurnStore()
+      return false
+    }
+    const neutrals = (gs.cells || []).filter((c:any)=> c.ownerTeamId === -1)
+    if (neutrals.length === 0) {
+      advanceTurnStore()
+      return false
+    }
+    const pick = neutrals[Math.floor(Math.random() * neutrals.length)]
+    const res = gs.allocateArmies(current.id, pick.id, 1)
+    advanceTurnStore()
+    // set preview to next
+    const nextState = useGameStore.getState()
+    const next = nextState.teams.length ? nextState.teams[nextState.turn % nextState.teams.length] : null
+    ;(nextState as any).setPreviewFromTeamId?.(next?.id)
+    return !!res?.success
+  }
+
+  // When entering reinforce phase, calculate reinforcements and reset turn to first player
+  useEffect(() => {
+    if (wdPhase === 'reinforce') {
+      calculateReinforcementsForAll()
+      // Reset turn to 0 and preview first player
+      setTurnStore(0)
+      const gs = useGameStore.getState()
+      ;(gs as any).setPreviewFromTeamId?.(gs.teams[0]?.id)
+      // If first player is AI, start AI placement loop
+      const first = gs.teams[0]
+      if (first && String(first.name).startsWith('AI') && ((first as any).reserve ?? 0) > 0) {
+        scheduleAiPlacementLoop(500)
+      }
+    }
+  }, [wdPhase, calculateReinforcementsForAll, setTurnStore])
 
 
   useEffect(() => {
@@ -280,6 +404,48 @@ function App() {
 
   // Manual direction selection - removed automatic selection
 
+
+  // Game mode selection page
+  if (!gameModeSelected) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+        <div className="max-w-4xl w-full">
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-white mb-4">Futbol İmparatorluğu</h1>
+            <p className="text-slate-300 text-lg">Oyun modunu seçin</p>
+          </div>
+          <div className="grid md:grid-cols-2 gap-6">
+            <div 
+              className="bg-gradient-to-br from-emerald-500/20 to-blue-500/20 border border-emerald-400/30 rounded-2xl p-8 cursor-pointer hover:from-emerald-500/30 hover:to-blue-500/30 transition-all duration-300"
+              onClick={() => {
+                setConfig({...config, gameMode: 'football'})
+                setGameModeSelected(true)
+              }}
+            >
+              <div className="text-center">
+                <div className="text-6xl mb-4">⚽</div>
+                <h2 className="text-2xl font-bold text-white mb-3">Futbol İmparatorluğu</h2>
+                <p className="text-slate-300">Klasik futbol takımları ile dünyayı fethedin</p>
+              </div>
+            </div>
+            <div 
+              className="bg-gradient-to-br from-red-500/20 to-purple-500/20 border border-red-400/30 rounded-2xl p-8 cursor-pointer hover:from-red-500/30 hover:to-purple-500/30 transition-all duration-300"
+              onClick={() => {
+                setConfig({...config, gameMode: 'world-domination'})
+                setGameModeSelected(true)
+              }}
+            >
+              <div className="text-center">
+                <div className="text-6xl mb-4">🌍</div>
+                <h2 className="text-2xl font-bold text-white mb-3">Dünya Hakimiyeti</h2>
+                <p className="text-slate-300">Stratejik savaş oyunu ile dünyayı ele geçirin</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>
@@ -388,13 +554,13 @@ function App() {
       </AnimatePresence>
       
       <div className="w-full p-0 bg-gradient-to-br from-slate-900/50 via-blue-900/30 to-slate-900/50 backdrop-blur-sm min-h-screen">
-        {!gameStarted && (
+        {!gameStarted && config.gameMode !== 'world-domination' && (
           <header className="text-center relative overflow-hidden mb-8">
             <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/10 via-blue-500/10 to-purple-500/10 blur-3xl"></div>
             <div className="relative z-10">
               <div className="mb-4">
                 <span className="inline-block px-4 py-2 bg-emerald-500/20 border border-emerald-400/30 rounded-full text-emerald-300 text-sm font-medium backdrop-blur-sm">
-                  🏆 {config.language==='tr' ? 'Stratejik Futbol Savaşları' : 'Strategic Football Battles'}
+                  🏆 {config.gameMode === 'world-domination' ? (config.language==='tr' ? 'Dünya Hakimiyeti' : 'World Domination') : (config.language==='tr' ? 'Stratejik Futbol Savaşları' : 'Strategic Football Battles')}
                 </span>
               </div>
               <div className="relative inline-block group">
@@ -407,7 +573,7 @@ function App() {
                 {/* Version Tooltip */}
                 <div className="absolute -top-8 -right-12 opacity-0 group-hover:opacity-100 transition-all duration-300 transform group-hover:-translate-y-1 z-50">
                   <div className="bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-bold rounded-lg px-4 py-2 text-base shadow-2xl border-2 border-white/20 whitespace-nowrap">
-                    v0.10.7
+                    v1.0.0
                   </div>
                 </div>
               </div>
@@ -418,7 +584,7 @@ function App() {
         </header>
         )}
 
-        {!gameStarted && (
+        {!gameStarted && config.gameMode !== 'world-domination' && (
           <div className="relative mx-auto mt-8 max-w-3xl animate-fade-in-scale">
             {/* Hero Section */}
             <div className="mb-6 text-center">
@@ -441,10 +607,36 @@ function App() {
               <div className="absolute -inset-1 bg-gradient-to-r from-emerald-500/20 via-blue-500/20 to-purple-500/20 rounded-2xl blur-sm"></div>
               <div className="absolute inset-0 bg-gradient-to-br from-slate-800/90 via-slate-900/95 to-slate-800/90 rounded-2xl border border-slate-700/50 backdrop-blur-xl"></div>
               
-            <div className="relative p-6">
+              <div className="relative p-6">
                 <div className="grid gap-5 lg:grid-cols-2">
                   {/* Left Column */}
                   <div className="space-y-5">
+                    <div className="group">
+                      <label className="mb-2 block text-sm font-semibold text-emerald-300 uppercase tracking-wide">🎮 {t('gameMode')}</label>
+                      <select
+                        value={config.gameMode || 'football'}
+                        onChange={(e)=>{
+                          const gm = e.target.value as GameConfig['gameMode']
+                          let newConfig: GameConfig = { ...config, gameMode: gm }
+                          if (gm === 'world-domination') {
+                            // Apply Risk-like defaults: manual selection, no wheel, manual placement
+                            newConfig = { ...newConfig,
+                              presetMode: 'manual', selectionMode: 'manual', directionMode: 'manual', resultMode: 'normal', animationSpeed: 'normal', teamSelectionMode: 'manual', mapColoring: 'solid'
+                            }
+                            // In world-domination mode we likely want fewer UI animations and manual placements
+                          } else {
+                            // Restore sensible football defaults
+                            newConfig = { ...newConfig, presetMode: 'normal', selectionMode: 'normal', directionMode: 'normal', resultMode: 'normal', animationSpeed: 'normal', teamSelectionMode: 'default' }
+                          }
+                          setConfig(newConfig);
+                          saveConfig(newConfig);
+                        }}
+                        className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 transition-all duration-200 backdrop-blur-sm hover:bg-slate-700/70"
+                      >
+                        <option value="football">{t('footballMode')}</option>
+                        <option value="world-domination">{t('worldDomination')}</option>
+                      </select>
+                    </div>
                     <div className="group">
                       <label className="mb-2 block text-sm font-semibold text-emerald-300 uppercase tracking-wide">
                         🌍 {t('country')}
@@ -583,9 +775,9 @@ function App() {
                   <div className="group space-y-3">
                     <div>
                       <label className="mb-2 block text-sm font-semibold text-amber-300 uppercase tracking-wide">⚙️ {t('preset')}</label>
-                      <select
+                  <select
                         value={config.presetMode}
-                        onChange={(e) => {
+                    onChange={(e) => {
                           const preset = e.target.value as GameConfig["presetMode"]
                           const presets: Record<string, Partial<GameConfig>> = {
                             normal: { selectionMode: 'normal', directionMode: 'normal', resultMode: 'normal', animationSpeed: 'normal', presetMode: 'normal', teamSelectionMode: 'default' },
@@ -593,18 +785,22 @@ function App() {
                             instant: { selectionMode: 'instant', directionMode: 'instant', resultMode: 'instant', animationSpeed: 'fast', presetMode: 'instant', teamSelectionMode: 'default' },
                             manual: { selectionMode: 'manual', directionMode: 'manual', resultMode: 'manual', animationSpeed: 'normal', presetMode: 'manual', teamSelectionMode: 'manual' }
                           }
-                          const newConfig = { ...config, ...presets[preset] }
-                          setConfig(newConfig)
-                          saveConfig(newConfig)
-                        }}
+                          let newConfig = { ...config, ...presets[preset] }
+                          // If World Domination mode, override some presets to Risk-like rules
+                          if (config.gameMode === 'world-domination') {
+                            newConfig = { ...newConfig, selectionMode: 'manual', directionMode: 'manual', resultMode: 'normal', animationSpeed: 'normal', teamSelectionMode: 'manual' }
+                      }
+                      setConfig(newConfig)
+                      saveConfig(newConfig)
+                    }}
                         className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition-all duration-200 backdrop-blur-sm hover:bg-slate-700/70"
                       >
                         <option value="normal">🎯 {t('presetNormal')}</option>
                         <option value="fast">🚀 {t('presetFast')}</option>
                         <option value="instant">⚡ {t('presetInstant')}</option>
                         <option value="manual">🎮 {t('presetManual')}</option>
-                      </select>
-                    </div>
+                  </select>
+                </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div>
                         <label className="mb-1 block text-xs font-semibold text-sky-300 uppercase tracking-wide">{t('selection')}</label>
@@ -657,9 +853,9 @@ function App() {
                           <option value="fast">{t('animFast')}</option>
                           <option value="none">{t('animNone')}</option>
                         </select>
-                      </div>
-                    </div>
-                    
+              </div>
+                </div>
+
                     {/* Randomize All Settings Button */}
                     <div className="mt-4 pt-4 border-t border-slate-600/30">
                       <button
@@ -744,7 +940,7 @@ function App() {
           </div>
         )}
 
-        {gameStarted && (
+        {gameStarted && config.gameMode !== 'world-domination' && (
           <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
             <div className="lg:col-span-10">
                 {/* Debug spinner props */}
@@ -963,7 +1159,7 @@ function App() {
                           }
                         } else {
                           setUiStep("team")
-                          setTeamSpinTarget(targetIndex)
+                        setTeamSpinTarget(targetIndex)
                         }
                       }}
                       className="group relative overflow-hidden bg-gradient-to-r from-red-500 to-orange-600 hover:from-red-400 hover:to-orange-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-300 transform hover:scale-105 active:scale-95 border border-white/20"
@@ -1182,8 +1378,8 @@ function App() {
                             setPreviewTarget(resolved.fromCellId, resolved.toCellId)
                             // Yol gösterici ışını kapat
                             try { setBeam(false, undefined) } catch {}
-                            setUiStep("attacking")
-                            setShowAttackerInfo(false)
+                              setUiStep("attacking")
+                              setShowAttackerInfo(false)
 
                             // Banner’ı ve attackedTeam bilgisini kısa bir gecikmeden sonra, 
                             // doğrudan previewTo üzerinden hesapla (yanlış eşleşmeyi engeller)
@@ -1199,11 +1395,11 @@ function App() {
                               }
                             }, (config.animationSpeed === 'none' || config.directionMode === 'instant') ? 0 : (config.animationSpeed === 'fast' || config.directionMode === 'fast' ? 400 : 800))
                           } else {
-                              setAnnouncement('⚠️ Bu yönde takım bulunamadı!')
-                              setRotatingArrow(undefined, undefined)
-                              setUiStep("direction-ready")
-                              // Auto-hide after 2 seconds
-                              setTimeout(() => setAnnouncement(null), 2000)
+                            setAnnouncement('⚠️ Bu yönde takım bulunamadı!')
+                            setRotatingArrow(undefined, undefined)
+                            setUiStep("direction-ready")
+                            // Auto-hide after 2 seconds
+                            setTimeout(() => setAnnouncement(null), 2000)
                           }
                         }, spinDelay)
                       }}
@@ -1345,14 +1541,40 @@ function App() {
                   
                   {/* Team Stats */}
                   <div className="mb-3 space-y-2">
-                    {teams.map((t) => {
+                    {teams
+                      .map((t) => {
                       const teamCells = cells.filter((c) => c.ownerTeamId === t.id)
                       const teamHistory = history.filter((h) => h.attackerTeamId === t.id)
                       const wins = teamHistory.filter((h) => h.attackerWon).length
                       const losses = teamHistory.length - wins
-                      const clubInfo = (COUNTRY_CLUBS[selectedCountry] || []).find((c:any)=> c.name === t.name)
-                      const primary = clubInfo?.colors?.[0] || t.color
-                      const strength = t.overall || 75
+                        const clubInfo = (COUNTRY_CLUBS[selectedCountry] || []).find((c:any)=> c.name === t.name)
+                        const primary = clubInfo?.colors?.[0] || t.color
+                        const strength = t.overall || 75
+                        
+                        return {
+                          team: t,
+                          teamCells,
+                          teamHistory,
+                          wins,
+                          losses,
+                          clubInfo,
+                          primary,
+                          strength
+                        }
+                      })
+                      .sort((a, b) => {
+                        // First sort by cups (territories)
+                        if (a.teamCells.length !== b.teamCells.length) {
+                          return b.teamCells.length - a.teamCells.length
+                        }
+                        // Then by strength
+                        if (a.strength !== b.strength) {
+                          return b.strength - a.strength
+                        }
+                        // Finally alphabetically
+                        return a.team.name.localeCompare(b.team.name)
+                      })
+                      .map(({ team: t, teamCells, wins, losses, primary, strength }) => {
                       
                       return (
                         <div key={t.id} className="flex items-center justify-between rounded-lg p-2 backdrop-blur-sm border"
@@ -1398,7 +1620,7 @@ function App() {
                               </span>
                               <span className={`px-1.5 py-0.5 rounded-full text-[10px] ${h.attackerWon ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'}`}>
                                 {winnerName}
-                              </span>
+                            </span>
                             </div>
                           )
                         })}
@@ -1410,15 +1632,211 @@ function App() {
             </div>
           </div>
         )}
+        {gameStarted && config.gameMode === 'world-domination' && (
+          <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
+            <div className="lg:col-span-10">
+              <MapView 
+                uiStep={wdPhase || ''}
+                cells={cells}
+                fastMode={false}
+                animationSpeed={'normal'}
+                selectionMode={'manual'}
+                manualMode={true}
+                skipAutoInit={true}
+                showTeamLogos={config.gameMode === 'world-domination' ? false : true}
+                onCellClick={(cellId:number)=>{
+                  const gs = useGameStore.getState() as any
+                  const teamsNow = gs.teams || []
+                  if (!teamsNow || teamsNow.length === 0) return
+                  const currentPlayerIdx = gs.turn % teamsNow.length
+                  const current = teamsNow[currentPlayerIdx]
+                  if (!current) return
+                  // Placement or reinforce: human-only manual placement
+                  if (wdPhase === 'placement' || wdPhase === 'reinforce') {
+                    // Debounce quick repeated clicks
+                    const now = Date.now()
+                    if (now - lastClickRef.current < 150) return
+                    lastClickRef.current = now
+                    if (!String(current.name).startsWith('Human')) return
+
+                    const cell = useGameState.getState().cells.find((c:any)=>c.id===cellId)
+                    const owner = cell?.ownerTeamId ?? -1
+                    // Allow placement on neutral or on own cells
+                    if (owner === -1 || owner === current.id) {
+                      const result = gs.allocateArmies(current.id, cellId, 1)
+                      if (result?.success) {
+                        setToast(`Asker yerleştirildi!`)
+                        setTimeout(() => setToast(null), 1600)
+                        // advance to next player
+                        advanceTurnStore()
+                        const newTurn = useGameStore.getState().turn
+                        const nextTeam = useGameStore.getState().teams[newTurn % (useGameStore.getState().teams.length || 1)]
+                        ;(useGameStore.getState() as any).setPreviewFromTeamId?.(nextTeam?.id)
+                        // if next is AI, start the sequential AI placement loop instead of bulk-placing
+                        if (nextTeam && String(nextTeam.name).startsWith('AI')) {
+                          scheduleAiPlacementLoop(500)
+                        }
+                      }
+                    } else {
+                      setToast('Bu hücreye yerleştiremezsiniz')
+                      setTimeout(()=> setToast(null),1200)
+                    }
+                    return
+                  }
+                  // Attack and fortify handled via side-panel controls (to keep UI simple)
+                }}
+                onAllocateArmies={(teamId:number, cellId:number, count:number) => {
+                  return (useGameStore.getState() as any).allocateArmies(teamId, cellId, count)
+                }}
+              />
+            </div>
+            <div className="flex flex-col lg:col-span-2">
+              <div className="relative rounded-xl overflow-hidden backdrop-blur-xl border border-white/20 p-3 flex-1 flex flex-col">
+                <h2 className="mb-2 text-base font-semibold text-white">{wdPhase==='placement'?'Yerleştirme':'Oyun'}</h2>
+                <div className="text-xs text-slate-300">Sıra: Player {(turn % teams.length) + 1}</div>
+                <div className="mt-2 space-y-3">
+                  {teams.map((t)=> (
+                    <div key={t.id} className="flex items-center justify-between bg-gradient-to-r from-slate-800/30 to-slate-900/40 p-3 rounded-lg shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div style={{width:28,height:28,background:(t as any).color,borderRadius:8,boxShadow:'0 4px 10px rgba(0,0,0,0.3)'}} />
+                        <div>
+                          <div className="text-sm font-semibold text-white">{t.name}</div>
+                          <div className="text-xs text-slate-400">ID: {t.id}</div>
+                        </div>
+                      </div>
+                      <div className="text-emerald-300 text-sm">Reserve: <span className="font-bold">{(t as any).reserve ?? 0}</span></div>
+                    </div>
+                  ))}
+                </div>
+                {wdPhase==='placement' && (
+                  <div className="mt-3 flex flex-col gap-2">
+          <button
+                      className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-semibold px-3 py-2"
+                      onClick={()=>{
+                        // Disabled manual next while placement ongoing; AI will auto-place
+                      }}
+                      disabled
+                    >Sonraki Oyuncu</button>
+                    <button className="w-full rounded-md bg-slate-700 text-white text-sm py-2" onClick={() => {
+                      // Force complete placement (for testing) -> move to reinforce
+                      teams.forEach((t)=> (useGameStore.getState() as any).setTeamReserve?.(t.id, (t as any).reserve ?? 0))
+                      setWdPhase('reinforce')
+                      // Start sequential AI placement loop
+                      const gs = useGameStore.getState() as any
+                      // ensure any AI reserves are set (they already are), then kick off the sequential placer
+                      scheduleAiPlacementLoop(250)
+                    }}>Tamamla ve Başlat</button>
+                  </div>
+                )}
+                {/* Phase controls for the running game */}
+                {wdPhase !== 'placement' && (
+                  <div className="mt-4 space-y-2">
+                    <div className="text-xs text-slate-400">Aktif Oyuncu: <span className="font-semibold text-white">{teams[turn % teams.length]?.name || '—'}</span></div>
+                    {aiBusy && (
+                      <div className="text-xs text-emerald-300">AI yerleştiriyor...</div>
+                    )}
+                    <div className="flex flex-col gap-2">
+                      {wdPhase === 'reinforce' && (
+                        <>
+                          <button className="w-full rounded-md bg-emerald-500 text-white py-2" onClick={() => {
+                            // End Reinforce: move to attack phase
+                            setWdPhase('attack')
+                            // reset turn to first alive player
+                            const gs = useGameStore.getState()
+                            const firstAlive = gs.teams.find((t:any)=> t.alive)
+                            ;(gs as any).setTurn?.(0)
+                            ;(gs as any).setPreviewFromTeamId?.(firstAlive?.id)
+                          }}>End Reinforce</button>
+                        </>
+                      )}
+                      {wdPhase === 'attack' && (
+                        <>
+                          <button className="w-full rounded-md bg-red-600 text-white py-2" onClick={() => {
+                            // End Attack: move to fortify
+                            setWdPhase('fortify')
+                            const gs = useGameStore.getState()
+                            ;(gs as any).setPreviewFromTeamId?.(gs.teams[gs.turn % gs.teams.length]?.id)
+                          }}>End Attack</button>
+                        </>
+                      )}
+                      {wdPhase === 'fortify' && (
+                        <>
+                          <button className="w-full rounded-md bg-indigo-600 text-white py-2" onClick={() => {
+                            // End Fortify: advance to next player's reinforce (calculate reinforcements)
+                            const gs = useGameStore.getState()
+                            const nextTurn = (gs.turn + 1) % (gs.teams.length || 1)
+                            ;(gs as any).setTurn?.(nextTurn)
+                            setWdPhase('reinforce')
+                            calculateReinforcementsForAll()
+                            ;(gs as any).setPreviewFromTeamId?.(gs.teams[nextTurn]?.id)
+                          }}>End Fortify</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+        {/* World Domination Landing and Game */}
+        {!gameStarted && config.gameMode === 'world-domination' && (
+          <div className="relative mx-auto mt-8 max-w-3xl animate-fade-in-scale">
+            <div className="mb-6 text-center">
+              <h2 className="text-2xl font-bold text-white mb-2">World Domination</h2>
+              <p className="text-slate-400 text-base">Ayarları yapılandırın ve oyunu başlatın</p>
+            </div>
+            <div className="relative p-6 rounded-2xl border border-slate-700/50 bg-slate-900/70">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-emerald-300 uppercase tracking-wide">Toplam Oyuncu</label>
+                  <input type="number" min={2} max={6} value={wdTotalPlayers} onChange={(e)=> setWdTotalPlayers(Math.max(2, Math.min(6, parseInt(e.target.value||'2',10))))} className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white"/>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-emerald-300 uppercase tracking-wide">Gerçek Oyuncu</label>
+                  <input type="number" min={1} max={wdTotalPlayers} value={wdHumanPlayers} onChange={(e)=> setWdHumanPlayers(Math.max(1, Math.min(wdTotalPlayers, parseInt(e.target.value||'1',10))))} className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white"/>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-emerald-300 uppercase tracking-wide">Başlangıç Askeri</label>
+                  <input type="number" min={5} max={60} value={wdStartingArmies} onChange={(e)=> setWdStartingArmies(Math.max(5, Math.min(60, parseInt(e.target.value||'20',10))))} className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white"/>
+                </div>
+                <div>
+                  <label className="mb-2 block text-sm font-semibold text-emerald-300 uppercase tracking-wide">Dil</label>
+                  <select value={config.language} onChange={(e)=>{ const newConfig = { ...config, language: e.target.value as any }; setConfig(newConfig); saveConfig(newConfig) }} className="w-full rounded-xl border border-slate-600/50 bg-slate-800/70 px-4 py-3 text-white">
+                    <option value="tr">Türkçe</option>
+                    <option value="en">English</option>
+                  </select>
+                </div>
+              </div>
+              <div className="mt-6">
+          <button
+                  className="group relative w-full bg-gradient-to-r from-emerald-500 to-blue-500 text-white font-bold py-2.5 px-5 rounded-xl"
+            onClick={() => {
+                    // Build WD players
+                    const players = Array.from({ length: wdTotalPlayers }, (_, i) => ({ id: i, name: (i < wdHumanPlayers ? `Human ${i+1}` : `AI ${i+1-wdHumanPlayers}`), color: ['#f43f5e','#22c55e','#3b82f6','#eab308','#8b5cf6','#14b8a6'][i%6], alive: true, overall: 75, abbreviation: `P${i+1}`, reserve: wdStartingArmies }))
+                    // Delay applying players until Map has initialized cells
+                    setPendingWdPlayers(players as any)
+                    // expose to Map for deferred initialization
+                    ;(window as any).__PENDING_WD_PLAYERS = players
+                    setWdPhase('placement')
+                    setGameStarted(true)
+                  }}
+                >
+                  Başlat
+          </button>
+        </div>
+      </div>
+          </div>
+        )}
       </div>
       {/* Restart button (desktop) */}
       <div className="hidden md:flex fixed bottom-4 right-4 z-40">
-        <button
+              <button
           className="rounded-xl px-4 py-2 font-semibold text-white bg-gradient-to-r from-slate-600 to-slate-800 border border-white/20 shadow-lg hover:from-slate-500 hover:to-slate-700"
-          onClick={() => window.location.reload()}
-        >
+                onClick={() => window.location.reload()}
+              >
           {t('restart')}
-        </button>
+              </button>
       </div>
       {isGameOver && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-slate-900/80 to-black/70 p-4">

@@ -10,16 +10,17 @@ import { COUNTRY_CLUBS, type Club } from "../data/clubs"
 import { motion } from "framer-motion"
 import ModernSpinner from "./ModernSpinner"
 import { BALANCE } from "../data/balance"
+import { playChampionsMelody } from "../lib/sound"
 
 const COUNTRY_NAME_TO_ID: Record<string, number | undefined> = {
   Turkey: 792,
   Italy: 380,
   Spain: 724,
-  France: 250,
   Germany: 276,
   Portugal: 620,
   Netherlands: 528,
-  England: 826 // UK id; we will use the UK outline as England placeholder
+  England: 826, // UK id; we will use the UK outline as England placeholder
+  "Champions League": 999 // Special ID for Champions League (Europe)
 }
 
 interface MapViewProps {
@@ -48,10 +49,13 @@ interface MapViewProps {
   manualMode?: boolean
   manualMapping?: Record<number, number>
   onCellClick?: (cellId: number) => void
+  onAllocateArmies?: (teamId: number, cellId: number, count: number) => void
+  onMoveArmies?: (fromCellId: number, toCellId: number, count: number) => void
   targetSelectMode?: boolean
   onTargetSelect?: (cellId: number) => void
   attackerSelectMode?: boolean
   onAttackerSelect?: (teamId: number) => void
+  skipAutoInit?: boolean
 }
 
 export default function MapView({
@@ -65,10 +69,14 @@ export default function MapView({
   manualMode = false,
   manualMapping,
   onCellClick,
+  onAllocateArmies,
+  onMoveArmies,
   targetSelectMode = false,
   onTargetSelect,
   attackerSelectMode = false,
   onAttackerSelect
+  , skipAutoInit = false,
+  showTeamLogos = true
 }: MapViewProps) {
   const selected = useGameStore((s) => s.selectedCountry)
   const numTeams = useGameStore((s) => s.numTeams)
@@ -79,7 +87,8 @@ export default function MapView({
   const snapIdx = useGameStore((s) => (s as { frozenSnapshotIndex?: number }).frozenSnapshotIndex)
   const history = useGameStore((s) => s.history)
   const teams = useGameStore((s) => (snapIdx != null && (s as { snapshots: { teams: unknown[], cells: unknown[] }[] }).snapshots[snapIdx]?.teams) || s.teams)
-  const storeCells = useGameStore((s) => (snapIdx != null && (s as { snapshots: { teams: unknown[], cells: unknown[] }[] }).snapshots[snapIdx]?.cells) || s.cells)
+  // Force map to subscribe directly to live cells so labels update immediately
+  const storeCells = useGameStore((s) => s.cells)
   const turn = useGameStore((s) => s.turn)
   const previewFrom = useGameStore((s) => (s as { previewFromCellId?: number }).previewFromCellId)
   const previewTo = useGameStore((s) => (s as { previewToCellId?: number }).previewToCellId)
@@ -98,6 +107,32 @@ export default function MapView({
   
   // Arrow rotation animation state
   const [currentRotation, setCurrentRotation] = useState(0)
+
+  // Play Champions League melody when entering Champions League mode
+  useEffect(() => {
+    if (selected === 'Champions League') {
+      playChampionsMelody()
+    }
+  }, [selected])
+
+  // Removed global debug click listener to avoid duplicate events and UI noise
+
+  // Sharpen territories briefly after each completed turn/attack
+  const [postAttackSharp, setPostAttackSharp] = useState(false)
+  const prevTurnRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (prevTurnRef.current == null) {
+      prevTurnRef.current = turn
+      return
+    }
+    if (turn > (prevTurnRef.current || 0)) {
+      setPostAttackSharp(true)
+      const dur = animationSpeed === 'none' ? 50 : (animationSpeed === 'fast' ? 300 : 900)
+      const tid = window.setTimeout(() => setPostAttackSharp(false), dur)
+      return () => window.clearTimeout(tid)
+    }
+    prevTurnRef.current = turn
+  }, [turn, animationSpeed])
   
   // Animate arrow rotation
   useEffect(() => {
@@ -146,7 +181,63 @@ export default function MapView({
     const countries = feature(world, world.objects.countries) as any
     const id = COUNTRY_NAME_TO_ID[selected]
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const f = countries.features.find((f: any) => String(f.id) === String(id)) as any
+    let f = countries.features.find((f: any) => String(f.id) === String(id)) as any
+
+    // If TFF 1.Lig selected, reuse Turkey's mainland feature
+    if (selected === 'TFF 1.Lig') {
+      const turkeyId = COUNTRY_NAME_TO_ID['Turkey']
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const turkeyFeature = countries.features.find((ff: any) => String(ff.id) === String(turkeyId)) as any
+      if (turkeyFeature) f = turkeyFeature
+    }
+    
+    // Special handling for Champions League - build Europe from country features
+    if (selected === 'Champions League') {
+      // Collect country features whose centroid falls roughly inside Europe
+      const europeFeatures: any[] = []
+      for (const cf of countries.features) {
+        try {
+          const b = geoBounds(cf as any)
+          const [[minLon, minLat], [maxLon, maxLat]] = b
+          const cenLon = (minLon + maxLon) / 2
+          const cenLat = (minLat + maxLat) / 2
+          // Rough Europe bbox: lon -25..45, lat 34..72
+          if (cenLon >= -25 && cenLon <= 45 && cenLat >= 34 && cenLat <= 72) {
+            europeFeatures.push(cf)
+          }
+        } catch (e) {
+          // ignore invalid geometries
+        }
+      }
+
+      // Build a MultiPolygon from collected features' coordinates
+      const multipolyCoords: any[] = []
+      for (const ef of europeFeatures) {
+        const geom = ef.geometry
+        if (!geom) continue
+        if (geom.type === 'Polygon') {
+          multipolyCoords.push(geom.coordinates)
+        } else if (geom.type === 'MultiPolygon') {
+          for (const p of geom.coordinates) multipolyCoords.push(p)
+        }
+      }
+
+      // Fallback: if nothing collected, fall back to whole world feature
+      if (multipolyCoords.length === 0) {
+        f = {
+          type: 'Feature',
+          properties: { NAME: 'Europe' },
+          geometry: { type: 'Polygon', coordinates: [[[-10, 35], [40, 35], [40, 70], [-10, 70], [-10, 35]]] }
+        }
+      } else {
+        f = {
+          type: 'Feature',
+          properties: { NAME: 'Europe' },
+          geometry: { type: 'MultiPolygon', coordinates: multipolyCoords }
+        }
+      }
+    }
+    
     return { countryFeature: f }
   }, [selected])
 
@@ -182,8 +273,16 @@ export default function MapView({
     const [[minX, minY], [maxX, maxY]] = p.bounds(countryFeature as any)
 
     const clubs = (COUNTRY_CLUBS[selected] || []).map((c, i) => ({ ...c, originalIndex: i }))
-    const validClubs = []
+    const validClubs: any[] = []
     for (const c of clubs) {
+      // Special-case: force Galatasaray to bottom-right in Champions League view
+      if (selected === 'Champions League' && c.name === 'Galatasaray') {
+        const padding = Math.min(60, (maxX - minX) * 0.08)
+        const gx = maxX - padding
+        const gy = maxY - padding
+        validClubs.push({ ...c, xy: [gx, gy] })
+        continue
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       if (!geoContains(countryFeature as any, [c.lon, c.lat])) continue
       const xy = projection([c.lon, c.lat]) as [number, number] | null
@@ -274,7 +373,26 @@ export default function MapView({
       return
     }
     try {
+      // If parent passed pending WD players into window for deferred init, apply them now
+      try {
+        const pending = (window as any).__PENDING_WD_PLAYERS
+        if (pending && Array.isArray(pending) && pending.length > 0) {
+          // Build neutral cells and set WD players
+          const cellsLocal = voronoiPolys.map((poly, i) => {
+            const c = polygonCentroid(poly as [number, number][]) as [number, number]
+            return { id: i, ownerTeamId: -1, centroid: c, polygon: poly, neighbors: [] as number[], armies: 0 }
+          })
+          const teams = pending.map((p: any, i: number) => ({ ...p, id: i, alive: true }))
+          ;(useGameStore.getState() as any).setWdPlayersAndNeutralCells(teams, cellsLocal)
+          ;(window as any).__PENDING_WD_PLAYERS = null
+        }
+      } catch (e) {}
       const clubs = (COUNTRY_CLUBS[selected] || [])
+      // If parent requested to skip auto init (e.g., World Domination), don't set teams here
+      if (skipAutoInit) {
+        initSigRef.current = sig
+        return
+      }
       // In manual mode, wait until mapping is complete
       if (manualMode) {
         const mapSize = Object.keys(manualMapping || {}).length
@@ -302,29 +420,29 @@ export default function MapView({
           assignedClubs.add(i)
         }
       } else {
-        // For each club, find all possible cell assignments with distances
-        for (let j = 0; j < selectedClubs.length; j++) {
+      // For each club, find all possible cell assignments with distances
+      for (let j = 0; j < selectedClubs.length; j++) {
           const club = selectedClubs[j] as Club
           if (!club) continue
-          const clubXY = projection([club.lon, club.lat]) as [number, number] | null
-          if (clubXY) {
-            for (let i = 0; i < points.length; i++) {
-              const cellCenter = points[i]
-              const distance = Math.sqrt(
-                Math.pow(cellCenter[0] - clubXY[0], 2) + 
-                Math.pow(cellCenter[1] - clubXY[1], 2)
-              )
-              clubAssignments.push({ clubIndex: j, cellIndex: i, distance })
-            }
+        const clubXY = projection([club.lon, club.lat]) as [number, number] | null
+        if (clubXY) {
+          for (let i = 0; i < points.length; i++) {
+            const cellCenter = points[i]
+            const distance = Math.sqrt(
+              Math.pow(cellCenter[0] - clubXY[0], 2) + 
+              Math.pow(cellCenter[1] - clubXY[1], 2)
+            )
+            clubAssignments.push({ clubIndex: j, cellIndex: i, distance })
           }
         }
-        // Sort by distance and assign clubs to cells (greedy assignment)
-        clubAssignments.sort((a, b) => a.distance - b.distance)
-        for (const assignment of clubAssignments) {
-          if (!assignedCells.has(assignment.cellIndex) && !assignedClubs.has(assignment.clubIndex)) {
-            cellToClub[assignment.cellIndex] = assignment.clubIndex
-            assignedCells.add(assignment.cellIndex)
-            assignedClubs.add(assignment.clubIndex)
+      }
+      // Sort by distance and assign clubs to cells (greedy assignment)
+      clubAssignments.sort((a, b) => a.distance - b.distance)
+      for (const assignment of clubAssignments) {
+        if (!assignedCells.has(assignment.cellIndex) && !assignedClubs.has(assignment.clubIndex)) {
+          cellToClub[assignment.cellIndex] = assignment.clubIndex
+          assignedCells.add(assignment.cellIndex)
+          assignedClubs.add(assignment.clubIndex)
           }
         }
       }
@@ -359,7 +477,20 @@ export default function MapView({
   }, [voronoiPolys, teamColors, points, setTeamsAndCells, selected, numTeams, mapColoring, size.w, size.h, seed, teams.length, storeCells.length, manualMode, manualMapping])
 
   return (
-    <div className="relative w-full h-full max-w-6xl mx-auto p-4">
+    <div
+      className="relative w-full h-full max-w-6xl mx-auto p-4"
+      onClickCapture={(e) => {
+        try {
+          // eslint-disable-next-line no-console
+          console.debug('Map: container click', { target: (e.target as Element).tagName, idAttr: (e.target as Element).getAttribute?.('data-cell-id') })
+          const el = (e.target as Element).closest('[data-cell-id]') as Element | null
+          if (el) {
+            // eslint-disable-next-line no-console
+            console.debug('Map: container resolved cell', el.getAttribute('data-cell-id'))
+          }
+        } catch (err) {}
+      }}
+    >
       {/* Glassmorphism Container */}
       <div className="relative rounded-2xl overflow-hidden backdrop-blur-xl border border-white/20 shadow-2xl"
            style={{
@@ -379,7 +510,7 @@ export default function MapView({
             <stop offset="100%" stopColor="#1e293b" stopOpacity="0.35" />
           </linearGradient>
           {/* Team stripe patterns - global per team to ensure seamless stripes across cells */}
-          {teams.map((t) => {
+        {showTeamLogos && teams.map((t) => {
             const club = (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (t as { name: string }).name)
             const dual = club?.colors
             if (!dual) return null
@@ -393,8 +524,42 @@ export default function MapView({
                 patternTransform="rotate(35)"
                 patternContentUnits="userSpaceOnUse"
               >
+                {mapColoring === "striped" ? (
+                  <>
                 <rect width="40" height="40" fill={dual[0]} />
                 <rect x="0" y="0" width="20" height="40" fill={dual[1]} />
+                  </>
+                ) : mapColoring === "classic" ? (
+                  <>
+                    <rect width="40" height="40" fill={dual[0]} />
+                    <rect x="0" y="0" width="40" height="20" fill={dual[1]} />
+                  </>
+                ) : mapColoring === "modern" ? (
+                  <>
+                    <rect width="40" height="40" fill={dual[0]} />
+                    <circle cx="20" cy="20" r="15" fill={dual[1]} />
+                  </>
+                ) : mapColoring === "retro" ? (
+                  <>
+                    <rect width="40" height="40" fill={dual[0]} />
+                    <rect x="5" y="5" width="30" height="30" fill={dual[1]} />
+                  </>
+                ) : mapColoring === "minimal" ? (
+                  <>
+                    <rect width="40" height="40" fill={dual[0]} />
+                    <rect x="10" y="10" width="20" height="20" fill={dual[1]} />
+                  </>
+                ) : mapColoring === "vibrant" ? (
+                  <>
+                    <rect width="40" height="40" fill={dual[0]} />
+                    <polygon points="20,5 35,15 35,25 20,35 5,25 5,15" fill={dual[1]} />
+                  </>
+                ) : (
+                  <>
+                    <rect width="40" height="40" fill={dual[0]} />
+                    <rect x="0" y="0" width="20" height="40" fill={dual[1]} />
+                  </>
+                )}
               </pattern>
             )
           })}
@@ -432,12 +597,12 @@ export default function MapView({
                 const c = polygonCentroid(poly as [number, number][]) as [number, number]
                 cell = { id: i, ownerTeamId: -1, centroid: c }
               } else {
-                // Skip rendering if store cells not ready yet
-                if (storeCells.length === 0) {
-                  return null
-                }
-                console.warn(`No cell found for voronoi poly ${i}, using neutral`)
+              // Skip rendering if store cells not ready yet
+              if (storeCells.length === 0) {
                 return null
+              }
+              console.warn(`No cell found for voronoi poly ${i}, using neutral`)
+              return null
               }
             }
             const owner = teams.find((t) => (t as { id: number }).id === (cell as { ownerTeamId: number }).ownerTeamId)
@@ -457,7 +622,7 @@ export default function MapView({
             const ownerId = owner ? (owner as { id: number }).id : 'neutral'
             // lookup dual colors
             const club = owner ? (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === (owner as { name: string }).name) : undefined
-            const dual = mapColoring === "striped" && club?.colors
+            const dual = mapColoring !== "solid" && club?.colors && club.colors.length >= 2
             
             // Apply theme-based visual effects
             const getThemeEffect = (baseColor: string) => {
@@ -498,14 +663,14 @@ export default function MapView({
                   fill={ prePhase
                     ? (preClub ? ((preClub.colors && preClub.colors.length > 0 ? preClub.colors[0] : preClub.color) || BALANCE.neutrals.color) : BALANCE.neutrals.color)
                     : (isNeutral
-                        ? BALANCE.neutrals.color
-                        : dual
-                        ? `url(#team-stripe-${(owner as { id: number })?.id})`
+                      ? BALANCE.neutrals.color
+                      : dual
+                      ? `url(#team-stripe-${(owner as { id: number })?.id})`
                         : (
                             // Solid: prefer club primary color to avoid mismatches (e.g., Galatasaray)
                             (club?.colors && club.colors.length > 0
                               ? club.colors[0]
-                              : ((owner as { color?: string })?.color || "#ddd")
+                      : ((owner as { color?: string })?.color || "#ddd")
                             )
                           )
                       )
@@ -546,22 +711,34 @@ export default function MapView({
                     if (manualMode) {
                       // When manualMode active, click communicates cell index to parent
                       // Use provided onCellClick if available
+                      // debug log to ensure clicks reach here
+                      try {
+                        // eslint-disable-next-line no-console
+                        console.debug('Map: cell clicked', { id: (cell as { id: number }).id, owner: (cell as { ownerTeamId: number }).ownerTeamId, manualMode, hasHandler: !!onCellClick })
+                      } catch (e) {}
                       if (onCellClick) onCellClick((cell as { id: number }).id)
                     }
                   }}
                   initial={{ opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }}
                   animate={
-                    // Saldırılan takımın hücrelerini netleştir
-                    isAttackedTeam
-                      ? { opacity: 1, filter: "blur(0px)", scale: 1.05 }
-                      : // Only show attacker team clearly when previewFromTeamId is set
-                    previewFromTeamId != null && (owner as { id: number })?.id === previewFromTeamId
-                      ? { opacity: 1, filter: "blur(0px)" }
-                      : previewFromTeamId != null && !isNeutral
-                      ? { opacity: 0.4, filter: "blur(3px)" }
-                      : isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam
-                      ? { opacity: 1, filter: "blur(0px)" }
-                      : { opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }
+                    // If we just finished a turn, emphasize affected territories
+                    postAttackSharp
+                      ? (isAttackedTeam || isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam || (previewFromTeamId != null && (owner as { id: number })?.id === previewFromTeamId))
+                        ? { opacity: 1, filter: "blur(0px)", scale: 1.05 }
+                        : { opacity: isNeutral ? 0.35 : 0.4, filter: "blur(3px)" }
+                      : (
+                        // Normal mode: Saldırılan takımın hücrelerini netleştir
+                        isAttackedTeam
+                          ? { opacity: 1, filter: "blur(0px)", scale: 1.05 }
+                          : // Only show attacker team clearly when previewFromTeamId is set
+                        previewFromTeamId != null && (owner as { id: number })?.id === previewFromTeamId
+                          ? { opacity: 1, filter: "blur(0px)" }
+                          : previewFromTeamId != null && !isNeutral
+                          ? { opacity: 0.4, filter: "blur(3px)" }
+                          : isCaptured || isPreviewFrom || isPreviewTo || isDefenderTeam
+                          ? { opacity: 1, filter: "blur(0px)" }
+                          : { opacity: isNeutral ? 0.5 : 0.95, filter: "blur(0px)" }
+                      )
                   }
                   transition={{ 
                     opacity: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.15 : 0.6), ease: "easeInOut" },
@@ -589,6 +766,7 @@ export default function MapView({
                   </g>
                 )}
                 
+                {/* Allocation controls removed per request */}
                 {/* Victory/Defeat animations on captured cell */}
                 {isCaptured && last && (
                   <>
@@ -696,6 +874,19 @@ export default function MapView({
                   )}
                   </>
                 )}
+                {/* Army count label */}
+                {(() => {
+                  const cx = poly.reduce((s, p) => s + p[0], 0) / poly.length
+                  const cy = poly.reduce((s, p) => s + p[1], 0) / poly.length
+                  const cellData = storeCells.find(c => (c as { id: number }).id === i)
+                  const armies = (cellData as any)?.armies ?? 0
+                  return (
+                    <g>
+                      <circle cx={cx} cy={cy} r={14} fill="#000" opacity={0.28} />
+                      <text x={cx} y={cy+5} textAnchor="middle" fontSize={12} fontWeight={800} fill="#fff">{armies}</text>
+                    </g>
+                  )
+                })()}
                 {/* Team label moved to overlay to ensure topmost layering */}
               </g>
             )
@@ -889,54 +1080,8 @@ export default function MapView({
           const centroid: [number, number] = [centerX, centerY]
           
           
-          return (
-            <g key={`logo-${teamId}-${turn}`} transform={`translate(${centroid[0]-32}, ${centroid[1]-32})`} data-team-id={teamId}>
-              <title>{teamName}</title>
-              <foreignObject width="64" height="64" x="0" y="0">
-                <div 
-                  style={{
-                    width: '64px',
-                    height: '64px',
-                    borderRadius: '18px',
-                    background: `linear-gradient(145deg, rgba(255,255,255,0.25), rgba(255,255,255,0.05))`,
-                    border: '1px solid rgba(255,255,255,0.4)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.6), 0 8px 24px rgba(0,0,0,0.25)',
-                    backdropFilter: 'blur(10px)',
-                    WebkitBackdropFilter: 'blur(10px)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    position: 'relative',
-                    overflow: 'hidden'
-                  }}
-                >
-                  {/* Inner tint matching team colors */}
-                  <div 
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      background: `linear-gradient(145deg, ${(club?.colors?.[0] || '#666')}80, ${(club?.colors?.[1] || '#999')}50)`,
-                      opacity: 0.85,
-                      mixBlendMode: 'multiply'
-                    }}
-                  >
-                    {/* content overlay */}
-                  </div>
-                  <div style={{position:'relative', zIndex:1, display:'flex', flexDirection:'column', alignItems:'center'}}>
-                    <div style={{
-                      fontSize:'12px', fontWeight:900,
-                      color:'#fff', textShadow:'0 2px 8px rgba(0,0,0,0.5)'
-                    }}>{club?.abbreviation || (teamName || 'TM').slice(0,2).toUpperCase()}</div>
-                    <div style={{
-                      fontSize:'8px', color:'#fff', opacity:0.9
-                    }}>{club?.founded || '1900'}</div>
-                  </div>
-                </div>
-              </foreignObject>
-            </g>
-          )
+          // logos removed per user request
+          return null
         })}
         
         {/* Rotating Arrow for Direction Selection */}
@@ -968,11 +1113,11 @@ export default function MapView({
             
             for (const cell of cellsWithData) {
               const voronoiPoly = voronoiPolys[cell.id]
-              if (voronoiPoly && voronoiPoly.length > 0) {
-                const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
-                const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
-                totalX += sumX / voronoiPoly.length
-                totalY += sumY / voronoiPoly.length
+            if (voronoiPoly && voronoiPoly.length > 0) {
+              const sumX = voronoiPoly.reduce((sum, point) => sum + point[0], 0)
+              const sumY = voronoiPoly.reduce((sum, point) => sum + point[1], 0)
+              totalX += sumX / voronoiPoly.length
+              totalY += sumY / voronoiPoly.length
                 validPolys++
               }
             }
@@ -1073,25 +1218,25 @@ export default function MapView({
               {/* Rotating arrow group - centered on team icon */}
               <g transform={`rotate(${currentRotation}, ${centerX}, ${centerY})`}>
                   {/* Arrow shaft - longer and more prominent */}
-                  <line
-                    x1={centerX}
-                    y1={centerY}
-                    x2={centerX}
+                <line
+                  x1={centerX}
+                  y1={centerY}
+                  x2={centerX}
                     y2={centerY - 120}
-                    stroke="url(#arrowGradient)"
+                  stroke="url(#arrowGradient)"
                     strokeWidth="16"
-                    strokeLinecap="round"
-                    filter="url(#arrowGlow)"
-                  />
-                  
+                  strokeLinecap="round"
+                  filter="url(#arrowGlow)"
+                />
+                
                   {/* Arrow head - larger and more detailed */}
-                  <polygon
+                <polygon
                     points={`${centerX},${centerY - 120} ${centerX - 25},${centerY - 90} ${centerX + 25},${centerY - 90}`}
-                    fill="url(#arrowGradient)"
-                    stroke="rgba(255,255,255,0.9)"
+                  fill="url(#arrowGradient)"
+                  stroke="rgba(255,255,255,0.9)"
                     strokeWidth="3"
-                    filter="url(#arrowGlow)"
-                  />
+                  filter="url(#arrowGlow)"
+                />
                   
                   {/* Center pivot point - enhanced */}
                   <circle
@@ -1215,8 +1360,8 @@ export default function MapView({
                   endY = hitY
                 } else {
                   // fallback to centroid if boundary intersection fails
-                  endX = closestHit.centroid[0]
-                  endY = closestHit.centroid[1]
+              endX = closestHit.centroid[0]
+              endY = closestHit.centroid[1]
                 }
               }
             }
@@ -1280,7 +1425,7 @@ export default function MapView({
                   opacity: [0, 0.3, 0.8, 1, 0.8, 0],
                   strokeWidth: [0, 2, 8, 16, 12, 0]
                 }}
-                  transition={{ 
+                transition={{ 
                   duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 3.0), 
                   ease: "easeOut",
                   x2: { duration: animationSpeed === 'none' ? 0.01 : (animationSpeed === 'fast' ? 0.4 : 3.0), ease: "easeOut" },

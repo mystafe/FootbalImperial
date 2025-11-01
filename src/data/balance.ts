@@ -17,4 +17,7 @@ export const BALANCE = {
     penaltyTurns: 3,
     penaltyPower: 2
   }
+  ,armies: {
+    armyPower: 0.5 // contribution of each army to battle power
+  }
 }

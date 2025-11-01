@@ -6,7 +6,7 @@ export type Language = "tr" | "en"
 export interface GameConfig {
   defaultTeamCount: number
   defaultCountry: string
-  mapColoring: "solid" | "striped"
+  mapColoring: "solid" | "striped" | "classic" | "modern" | "retro" | "minimal" | "vibrant"
   mapTheme: "classic" | "neon" | "ocean" | "fire" | "forest"
   // legacy flags (kept for backwards compatibility with saved configs)
   fastMode?: boolean
@@ -21,11 +21,16 @@ export interface GameConfig {
   teamSelectionMode: "default" | "manual" | "layout"
   teamSelectionLayoutName?: string
   language: Language
+  gameMode?: 'football' | 'world-domination'
+  // World Domination specific
+  worldHumanPlayers?: number
+  worldStartingArmies?: number
+  worldReinforcementsPerTurn?: number
 }
 
 export const defaultConfig: GameConfig = {
   defaultTeamCount: 4,
-  defaultCountry: "Turkey",
+  defaultCountry: "Champions League",
   mapColoring: "striped",
   mapTheme: "classic",
   fastMode: false,
@@ -37,6 +42,10 @@ export const defaultConfig: GameConfig = {
   animationSpeed: "normal",
   teamSelectionMode: "default",
   language: "en"
+  ,gameMode: 'football'
+  ,worldHumanPlayers: 2
+  ,worldStartingArmies: 20
+  ,worldReinforcementsPerTurn: 3
 }
 
 // Load config from localStorage or use defaults

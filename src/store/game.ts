@@ -10,6 +10,7 @@ export interface Cell {
   centroid: [number, number]
   polygon?: [number, number][]
   neighbors?: number[]
+  armies?: number // number of armies/troops on this cell (used in World Domination mode)
 }
 
 export interface Team {
@@ -40,7 +41,7 @@ export interface HistoryItem {
 interface GameState {
   selectedCountry: CountryKey
   numTeams: number
-  mapColoring: "solid" | "striped"
+  mapColoring: "solid" | "striped" | "classic" | "modern" | "retro" | "minimal" | "vibrant"
   seed: string
   turn: number
   gameStarted?: boolean
@@ -68,6 +69,7 @@ interface GameState {
   setNumTeams: (n: number) => void
   setMapColoring: (coloring: "solid" | "striped") => void
   setTeamsAndCells: (teams: Team[], cells: Cell[]) => void
+  setWdPlayersAndNeutralCells?: (players: Team[], cells: Cell[]) => void
   setGameStarted?: (started: boolean) => void
   setPreviewTarget: (fromCellId?: number, toCellId?: number) => void
   setSuppressLastOverlay?: (v: boolean) => void
@@ -103,27 +105,33 @@ interface GameState {
   resetToInitial: () => void
   saveToStorage: () => void
   loadFromStorage: () => void
+  currentPlayerIndex?: number
+  calculateReinforcementsForAll: () => void
+  allocateArmies: (teamId: number, cellId: number, count: number) => { success: boolean }
+  moveArmies: (fromCellId: number, toCellId: number, count: number) => { success: boolean }
 }
 
 export type CountryKey =
   | "Turkey"
   | "Italy"
   | "Spain"
-  | "France"
   | "Germany"
   | "Portugal"
   | "Netherlands"
   | "England"
+  | "TFF 1.Lig"
+  | "Champions League"
 
 export const COUNTRIES: CountryKey[] = [
   "Turkey",
   "Italy",
   "Spain",
-  "France",
   "Germany",
   "Portugal",
   "Netherlands",
-  "England"
+  "England",
+  "TFF 1.Lig",
+  "Champions League"
 ]
 
 export const DIRECTIONS: Direction[] = [
@@ -143,7 +151,6 @@ const getCountryMaxTeams = (country: CountryKey): number => {
     case "Italy":
     case "Spain":
       return 20
-    case "France":
     case "Germany":
     case "Portugal":
     case "Netherlands":
@@ -171,6 +178,9 @@ export const useGameStore = create<GameState>((set, get) => ({
   frozenSnapshotIndex: undefined,
   previewFromTeamId: undefined,
   setSeed: (seed: string) => set({ seed }),
+  setTurn: (t: number) => set({ turn: t }),
+  advanceTurn: () =>
+    set((state) => ({ turn: state.turn + 1 })),
   setCountry: (c: CountryKey) => set((state) => {
     const max = getCountryMaxTeams(c)
     const clamped = Math.max(2, Math.min(max, state.numTeams))
@@ -213,13 +223,9 @@ export const useGameStore = create<GameState>((set, get) => ({
 
       // Create cells with proper ownership
       const cells = cellsIn.map((c) => {
-        if (neutralIds.has(c.id)) {
-          return { ...c, ownerTeamId: -1 }
-        } else if (teamCellIds.has(c.id)) {
-          return { ...c, ownerTeamId: c.id } // Team owns cell with same ID
-        } else {
-          return { ...c, ownerTeamId: c.id } // Default: team owns cell with same ID
-        }
+        const base = (neutralIds.has(c.id)) ? { ...c, ownerTeamId: -1 } : { ...c, ownerTeamId: c.id }
+        // Initialize armies for World Domination mode: neutral cells get 1 army, team-held cells get 3
+        return { ...base, armies: base.ownerTeamId === -1 ? 1 : 3 }
       })
 
       // Now assign capitals: each team's capital is the cell with same ID
@@ -243,6 +249,98 @@ export const useGameStore = create<GameState>((set, get) => ({
         ]
       }
     }),
+  setWdPlayersAndNeutralCells: (players: Team[], cellsIn: Cell[]) =>
+    set((_state) => {
+      // All cells start neutral with 0 armies
+      const cells = cellsIn.map((c) => ({ ...c, ownerTeamId: -1, armies: 0 }))
+      // Ensure players have reserve field (take reserve from provided players or default 0)
+      const teams = players.map((p, i) => ({ ...p, id: i, alive: true, reserve: (p as any).reserve ?? 0 }))
+      return {
+        teams,
+        cells,
+        turn: 0,
+        history: [],
+        snapshots: [
+          {
+            teams: JSON.parse(JSON.stringify(teams)),
+            cells: JSON.parse(JSON.stringify(cells)),
+            turn: 0,
+            history: []
+          }
+        ],
+        previewFromCellId: undefined,
+        previewToCellId: undefined
+      }
+    }),
+  currentPlayerIndex: 0,
+  calculateReinforcementsForAll: () => {
+    set((state) => {
+      const ownerCounts = new Map<number, number>()
+      for (const c of state.cells) ownerCounts.set(c.ownerTeamId, (ownerCounts.get(c.ownerTeamId) || 0) + 1)
+      const newTeams = state.teams.map((t) => {
+        const count = ownerCounts.get(t.id) || 0
+        const reinf = Math.max(3, Math.floor(count / 3))
+        return { ...t, reserve: reinf }
+      })
+      return { teams: newTeams }
+    })
+  },
+  allocateArmies: (teamId: number, cellId: number, count: number) => {
+    const state = get()
+    const team = state.teams.find((t) => t.id === teamId)
+    try {
+      // eslint-disable-next-line no-console
+      console.debug('store.allocateArmies called', { teamId, cellId, count, teams: state.teams.map(t=>({id:t.id, reserve:(t as any).reserve})) })
+    } catch (e) {}
+    if (!team) return { success: false }
+    const reserve = (team as any).reserve ?? 0
+    if (count <= 0 || reserve < count) return { success: false }
+    const cellIdx = state.cells.findIndex((c) => c.id === cellId)
+    if (cellIdx === -1) {
+      // If store has no cells yet (map still in pre-phase), create a minimal cell so allocation can proceed
+      if ((state.cells || []).length === 0) {
+        const newCell = { id: cellId, ownerTeamId: teamId, centroid: [0,0] as [number, number], polygon: undefined as any, neighbors: [] as number[], armies: count }
+        set((s) => ({ cells: [newCell], teams: s.teams.map(tm => tm.id === teamId ? { ...tm, reserve: Math.max(0, ((tm as any).reserve ?? 0) - count) } : tm) }))
+        return { success: true }
+      }
+      return { success: false }
+    }
+    const cell = state.cells[cellIdx]
+    // Allow allocation to neutral cells (capture by placing >=1)
+    if (cell.ownerTeamId !== teamId && cell.ownerTeamId !== -1) return { success: false }
+    set((s) => {
+      const nextCells = s.cells.map((c) => {
+        if (c.id !== cellId) return c
+        if (c.ownerTeamId === -1) {
+          return { ...c, ownerTeamId: teamId, armies: (c.armies ?? 0) + count }
+        }
+        return { ...c, armies: (c.armies ?? 0) + count }
+      })
+      const nextTeams = s.teams.map((tm) => (tm.id === teamId ? { ...tm, reserve: Math.max(0, (tm as any).reserve - count) } : tm))
+      return { cells: nextCells, teams: nextTeams }
+    })
+    return { success: true }
+  },
+  moveArmies: (fromCellId: number, toCellId: number, count: number) => {
+    const state = get()
+    const fromIdx = state.cells.findIndex((c) => c.id === fromCellId)
+    const toIdx = state.cells.findIndex((c) => c.id === toCellId)
+    if (fromIdx === -1 || toIdx === -1) return { success: false }
+    const from = state.cells[fromIdx]
+    const to = state.cells[toIdx]
+    if (from.ownerTeamId !== to.ownerTeamId) return { success: false }
+    const available = (from.armies ?? 0)
+    if (count <= 0 || available - count < 1) return { success: false } // must leave at least 1
+    set((s) => {
+      const nextCells = s.cells.map((c) => {
+        if (c.id === fromCellId) return { ...c, armies: (c.armies ?? 0) - count }
+        if (c.id === toCellId) return { ...c, armies: (c.armies ?? 0) + count }
+        return c
+      })
+      return { cells: nextCells }
+    })
+    return { success: true }
+  },
   setGameStarted: (started: boolean) => set({ gameStarted: started }),
   setPreviewTarget: (fromCellId?: number, toCellId?: number) =>
     set({ previewFromCellId: fromCellId, previewToCellId: toCellId }),
@@ -253,6 +351,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     set({ rotatingArrowTeamId: teamId, rotatingArrowAngle: angle }),
   setBeam: (active: boolean, targetCell?: number) =>
     set({ beamActive: active, beamTargetCell: targetCell }),
+  setTeamReserve: (teamId: number, reserve: number) =>
+    set((state) => ({ teams: state.teams.map(t => t.id === teamId ? { ...t, reserve } : t) })),
   resolveTarget: (attackerTeamId: number, direction: Direction) => {
     const state = get()
     const dirAngle: Record<Direction, number> = {
@@ -799,6 +899,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       }
 
       const defenderTeamId = state.cells.find((c) => c.id === toCellId)?.ownerTeamId
+      const fromCell = state.cells.find((c) => c.id === fromCellId)
+      const toCell = state.cells.find((c) => c.id === toCellId)
 
       // Neutral
       if (defenderTeamId === -1) {
@@ -848,25 +950,50 @@ export const useGameStore = create<GameState>((set, get) => ({
         return count * BALANCE.neighborSupportWeight
       }
 
+      // In World Domination mode, factor armies into power
       const baseA = attackerTeam?.overall ?? 75
       const baseB = defenderTeam?.overall ?? 75
+      const armiesA = fromCell?.armies ?? 1
+      const armiesB = toCell?.armies ?? 1
       const formA = (attackerTeam?.form ?? 1) * (state.turn < (attackerTeam?.capitalPenaltyUntilTurn ?? 0) ? 1 - BALANCE.capital.penaltyPower / 100 : 1)
       const formB = (defenderTeam?.form ?? 1) * (state.turn < (defenderTeam?.capitalPenaltyUntilTurn ?? 0) ? 1 - BALANCE.capital.penaltyPower / 100 : 1)
-      const powerA = baseA * formA + support(attackerTeamId, fromCellId)
-      const powerB = baseB * formB + support(defenderTeamId as number, toCellId)
+      const powerA = baseA * formA + support(attackerTeamId, fromCellId) + armiesA * BALANCE.armies.armyPower
+      const powerB = baseB * formB + support(defenderTeamId as number, toCellId) + armiesB * BALANCE.armies.armyPower
       const x = (powerA - powerB) / BALANCE.k + BALANCE.attackerAdvantageX
       const logistic = (v: number) => 1 / (1 + Math.exp(-v))
       const p = logistic(x)
 
+      // For World Domination mode we want dice-based deterministic resolution. We'll simulate 3 dice (attacker) vs up to 2 dice (defender) weighted by armies.
       const rng = createRng(`${state.seed}:match:${state.turn}:${attackerTeamId}:${toCellId}`)
-      const roll = rng()
-      const attackerWon = roll < p
+      // Determine dice counts from armies: attacker up to 3 (must leave 1 behind), defender up to 2
+      const attackerArmies = Math.max(1, (state.cells.find(c => c.id === fromCellId)?.armies ?? 1) - 1)
+      const defenderArmies = state.cells.find(c => c.id === toCellId)?.armies ?? 1
+      const attackerDice = Math.min(3, attackerArmies)
+      const defenderDice = Math.min(2, defenderArmies)
+      const rollDice = (n: number) => Array.from({ length: n }, () => Math.floor(rng() * 6) + 1)
+      const aRolls = rollDice(attackerDice).sort((a, b) => b - a)
+      const dRolls = rollDice(defenderDice).sort((a, b) => b - a)
+      // Compare highest dice pairs
+      let attackerLost = 0
+      let defenderLost = 0
+      for (let i = 0; i < Math.min(aRolls.length, dRolls.length); i++) {
+        if (aRolls[i] > dRolls[i]) defenderLost++
+        else attackerLost++
+      }
+      const attackerWon = defenderLost > attackerLost
 
       const winnerId = attackerWon ? attackerTeamId : (defenderTeamId as number)
       const loserId = attackerWon ? (defenderTeamId as number) : attackerTeamId
 
-      const newCells = state.cells.map((cell) =>
-        cell.ownerTeamId === loserId ? { ...cell, ownerTeamId: winnerId } : cell
+      // Apply army losses
+      const newCellsArmies = state.cells.map((cell) => {
+        if (cell.id === fromCellId) return { ...cell, armies: Math.max(1, (cell.armies ?? 1) - attackerLost) }
+        if (cell.id === toCellId) return { ...cell, armies: Math.max(0, (cell.armies ?? 1) - defenderLost) }
+        return cell
+      })
+      // If attacker wins (defender lost all armies on that cell) capture
+      const newCells = newCellsArmies.map((cell) =>
+        (cell.id === toCellId && (cell.armies ?? 0) === 0) ? { ...cell, ownerTeamId: attackerTeamId, armies: Math.max(1, Math.floor((state.cells.find(c=>c.id===fromCellId)?.armies??1)/2)) } : cell
       )
 
       const updateWinnerCapital = (teamId: number) => {
@@ -970,7 +1097,12 @@ export const useGameStore = create<GameState>((set, get) => ({
       // Merge territories based on forced outcome
       const winnerId = attackerWon ? attackerTeamId : (defenderTeamId as number)
       const loserId = attackerWon ? (defenderTeamId as number) : attackerTeamId
-      const newCells = state.cells.map((cell) => cell.ownerTeamId === loserId ? { ...cell, ownerTeamId: winnerId } : cell)
+      // For forced outcomes adjust armies similarly: losing side loses up to 2 armies on the contested cell
+      const newCells = state.cells.map((cell) => {
+        if (cell.id === fromCellId) return { ...cell, armies: Math.max(1, (cell.armies ?? 1) - (attackerWon ? 0 : 1)) }
+        if (cell.id === toCellId) return { ...cell, armies: Math.max(0, (cell.armies ?? 1) - (attackerWon ? 1 : 0)) }
+        return cell.ownerTeamId === loserId ? { ...cell, ownerTeamId: winnerId } : cell
+      })
 
       const updateWinnerCapital = (teamId: number) => {
         const teamCells = newCells.filter(cell => cell.ownerTeamId === teamId)
@@ -1055,9 +1187,44 @@ export const useGameStore = create<GameState>((set, get) => ({
     return { success: true }
   },
   playAutoTurn: () => {
-    const success = false
-    set((state) => state)
-    return { success }
+    // Simple AI: reinforcement allocation then one attack per live team
+    set((state) => {
+      const rng = createRng(`${state.seed}:ai:${state.turn}`)
+      // Reinforcements: calculate and place randomly on owned cells
+      const ownerToCells = new Map<number, number[]>()
+      for (const c of state.cells) {
+        ownerToCells.set(c.ownerTeamId, (ownerToCells.get(c.ownerTeamId) || []).concat(c.id))
+      }
+      const nextCells = state.cells.map((c) => ({ ...c }))
+      for (const t of state.teams) {
+        const reserve = (t as any).reserve ?? 0
+        if (reserve > 0) {
+          const owned = ownerToCells.get(t.id) || []
+          for (let i = 0; i < reserve; i++) {
+            if (owned.length === 0) break
+            const pick = owned[Math.floor(rng() * owned.length)]
+            const idx = nextCells.findIndex(nc => nc.id === pick)
+            if (idx !== -1) nextCells[idx] = { ...nextCells[idx], armies: (nextCells[idx].armies ?? 0) + 1 }
+          }
+        }
+      }
+      // Simple attacks: for each team, try to attack a neighboring enemy cell if armies > 1
+      for (const t of state.teams) {
+        const ownedCells = nextCells.filter(c => c.ownerTeamId === t.id && (c.armies ?? 0) > 1)
+        for (const oc of ownedCells) {
+          const neighbors = oc.neighbors || []
+          const enemyNeighbors = neighbors.map(n => nextCells[n]).filter(nc => nc && nc.ownerTeamId !== t.id)
+          if (enemyNeighbors.length === 0) continue
+          const target = enemyNeighbors[Math.floor(rng() * enemyNeighbors.length)]
+          if (!target) continue
+          // Resolve attack via existing applyAttackToCell
+          ;(get() as any).applyAttackToCell(t.id, oc.id, target.id)
+          break // one attack per team
+        }
+      }
+      return { cells: nextCells }
+    })
+    return { success: true }
   },
   undo: () =>
     set((state) => {
