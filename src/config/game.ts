@@ -21,11 +21,6 @@ export interface GameConfig {
   teamSelectionMode: "default" | "manual" | "layout"
   teamSelectionLayoutName?: string
   language: Language
-  gameMode?: 'football' | 'world-domination'
-  // World Domination specific
-  worldHumanPlayers?: number
-  worldStartingArmies?: number
-  worldReinforcementsPerTurn?: number
 }
 
 export const defaultConfig: GameConfig = {
@@ -42,10 +37,6 @@ export const defaultConfig: GameConfig = {
   animationSpeed: "normal",
   teamSelectionMode: "default",
   language: "en"
-  ,gameMode: 'football'
-  ,worldHumanPlayers: 2
-  ,worldStartingArmies: 20
-  ,worldReinforcementsPerTurn: 3
 }
 
 // Load config from localStorage or use defaults

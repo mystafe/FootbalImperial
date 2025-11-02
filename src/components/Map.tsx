@@ -49,13 +49,13 @@ interface MapViewProps {
   manualMode?: boolean
   manualMapping?: Record<number, number>
   onCellClick?: (cellId: number) => void
-  onAllocateArmies?: (teamId: number, cellId: number, count: number) => void
-  onMoveArmies?: (fromCellId: number, toCellId: number, count: number) => void
+  // WD-only props removed
   targetSelectMode?: boolean
   onTargetSelect?: (cellId: number) => void
   attackerSelectMode?: boolean
   onAttackerSelect?: (teamId: number) => void
   skipAutoInit?: boolean
+  showTeamLogos?: boolean
 }
 
 export default function MapView({
@@ -69,8 +69,7 @@ export default function MapView({
   manualMode = false,
   manualMapping,
   onCellClick,
-  onAllocateArmies,
-  onMoveArmies,
+  
   targetSelectMode = false,
   onTargetSelect,
   attackerSelectMode = false,
@@ -950,11 +949,11 @@ export default function MapView({
         </g>
         
         {/* Team logos - rendered last for proper z-index */}
-        {teams.map((team) => {
+        {showTeamLogos && teams.map((team) => {
           const teamId = (team as { id: number }).id
           const teamName = (team as { name?: string })?.name
           const isAlive = (team as { alive: boolean }).alive
-          const club = (COUNTRY_CLUBS[selected] || []).find(c => (c as { name: string }).name === teamName)
+          // club lookup not needed for logo label
           
           // Hide logos of dead teams
           if (!isAlive) {
@@ -1074,14 +1073,15 @@ export default function MapView({
             centerX = bestCell.centroid[0]
             centerY = bestCell.centroid[1]
           }
-          
-          
-          // CSS logo generation - no need for SVG paths
-          const centroid: [number, number] = [centerX, centerY]
-          
-          
-          // logos removed per user request
-          return null
+          // Render team abbreviation at the computed centroid
+          const abbr = (team as { abbreviation?: string; name?: string }).abbreviation || String(teamName || '').slice(0, 2).toUpperCase()
+          return (
+            <g key={`logo-${teamId}`}>
+              <text x={centerX} y={centerY + 5} textAnchor="middle" fontSize={14} fontWeight={900} fill="#fff" stroke="#000" strokeWidth={3} style={{ paintOrder: 'stroke' }}>
+                {abbr}
+              </text>
+            </g>
+          )
         })}
         
         {/* Rotating Arrow for Direction Selection */}

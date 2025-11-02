@@ -731,9 +731,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       const loserId = attackerWon ? (defenderTeamId as number) : attackerTeamId
       
       // Merge territories: loser's territories become winner's
-      const newCells = state.cells.map((cell) =>
+      const newCells = state.cells.map((cell) => (
         cell.ownerTeamId === loserId ? { ...cell, ownerTeamId: winnerId } : cell
-      )
+      ))
       
       // Update winner's capital to be in the center of their merged territory
       const updateWinnerCapital = (teamId: number) => {
@@ -983,7 +983,6 @@ export const useGameStore = create<GameState>((set, get) => ({
       const attackerWon = defenderLost > attackerLost
 
       const winnerId = attackerWon ? attackerTeamId : (defenderTeamId as number)
-      const loserId = attackerWon ? (defenderTeamId as number) : attackerTeamId
 
       // Apply army losses
       const newCellsArmies = state.cells.map((cell) => {
